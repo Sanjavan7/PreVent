@@ -35,7 +35,9 @@ import { useSceneRefs } from './sceneRefs';
 import { useMonitorTexture } from './useMonitorTexture';
 import { ROOM_LAYOUT } from './ward/layout';
 import { Ward } from './ward/Ward';
+import { WardInteractions } from './ward/WardInteractions';
 import { People } from './ward/People';
+import { CameraRig } from './CameraRig';
 
 interface Props {
   /** Stable accessor for the latest device row (identity never changes). */
@@ -55,6 +57,14 @@ export const Scene = memo(function Scene({ getDevice, reducedMotion }: Props) {
   // never happen in useFrame, so re-rendering <Scene> on a step is cheap.
   const [tier, setTier] = useState<PerfTier>('HIGH');
 
+  // Click-to-focus selection + hover. DISCRETE state (set on pointer events in
+  // WardInteractions, never per frame). Changing these re-renders only the cheap
+  // WardInteractions layer -- the memoized <Ward> subtree bails out (its props
+  // never depend on hover/selection). The smooth camera glide to the selected
+  // room runs in CameraRig's useFrame; this state just names the target.
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [hoveredId, setHoveredId] = useState<string | null>(null);
+
   return (
     <>
       <Lighting hemiRef={refs.hemi} sunRef={refs.sun} />
@@ -63,6 +73,14 @@ export const Scene = memo(function Scene({ getDevice, reducedMotion }: Props) {
       <Bounds fit clip observe margin={1.2} maxDuration={0.8}>
         <Center disableY>
           <Ward layout={ROOM_LAYOUT} refs={refs} screenTex={screenTex} />
+          {/* Click-to-focus hit areas, highlights + labels. Same local space as
+              Ward so it rides the Center/Bounds transform and stays aligned. */}
+          <WardInteractions
+            selectedId={selectedId}
+            hoveredId={hoveredId}
+            onHover={setHoveredId}
+            onSelect={setSelectedId}
+          />
         </Center>
       </Bounds>
 
@@ -119,10 +137,19 @@ export const Scene = memo(function Scene({ getDevice, reducedMotion }: Props) {
       />
       <Preload all />
 
-      {/* The single animation loop. Renders nothing. */}
+      {/* The single device-animation loop. Renders nothing. */}
       <DeviceDriver
         getDevice={getDevice}
         refs={refs}
+        reducedMotion={reducedMotion}
+      />
+
+      {/* Smooth click-to-focus camera glide (own useFrame; eases target +
+          distance toward the selected room, or back to the overview). Mounted
+          last so it has the final say on the camera each frame. */}
+      <CameraRig
+        controlsRef={refs.controls}
+        selectedId={selectedId}
         reducedMotion={reducedMotion}
       />
     </>

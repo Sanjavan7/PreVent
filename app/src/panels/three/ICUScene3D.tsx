@@ -91,7 +91,7 @@ export default function ICUScene3D({ device, fallback = null }: Props) {
         <Canvas
           flat
           frameloop={reducedMotion ? 'demand' : 'always'}
-          shadows="soft"
+          shadows="percentage"
           dpr={[1, 1.5]}
           performance={{ min: 0.5 }}
           gl={{
