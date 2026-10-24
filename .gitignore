@@ -26,6 +26,9 @@ target/
 /recordings/
 *.mp4
 
+# express-path cache (PLAN-DEV1 task 5)
+agents/.cache
+
 # security loop runtime artifacts (the shared device_status row sink + receipts)
 security/.device_row.json
 security/.runs/
