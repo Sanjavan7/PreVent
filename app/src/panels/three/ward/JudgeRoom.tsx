@@ -160,7 +160,9 @@ export const JudgeRoom = memo(function JudgeRoom({
             <boxGeometry args={[0.95, 0.1, 2.05]} />
             <meshStandardMaterial color={hex(C.plastic)} metalness={0} roughness={0.6} />
           </mesh>
-          <RoundedBox args={[0.9, 0.14, 1.9]} radius={0.05} smoothness={3} position={[0, 0.47, 0.05]} castShadow>
+          {/* Mattress: thin flat slab on the frame -- no castShadow (the frame
+              below already grounds the bed). */}
+          <RoundedBox args={[0.9, 0.14, 1.9]} radius={0.05} smoothness={3} position={[0, 0.47, 0.05]}>
             <meshStandardMaterial color={hex(C.linen)} metalness={0} roughness={0.95} />
           </RoundedBox>
           {([-0.5, 0.5] as const).map((x) => (

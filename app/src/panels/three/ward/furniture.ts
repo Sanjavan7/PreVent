@@ -116,10 +116,11 @@ export const Bed = memo(function Bed({ position = [0, 0, 0], rotation }: Placed)
         chrome(),
       ),
     ),
-    // Mattress (bright linen).
+    // Mattress (bright linen). No castShadow -- a thin flat slab resting on the
+    // frame; the frame below already casts the bed's grounding shadow.
     h(
       'mesh',
-      { key: 'mat', position: [0, 0.47, 0.05], castShadow: true },
+      { key: 'mat', position: [0, 0.47, 0.05] },
       h('boxGeometry', { args: [0.9, 0.14, 1.9] }),
       matte(C.linen, 0.95),
     ),
@@ -233,10 +234,10 @@ export const MonitorBox = memo(function MonitorBox({
       h('cylinderGeometry', { args: [0.025, 0.025, 0.95, 10] }),
       chrome(),
     ),
-    // Housing (ceramic white).
+    // Housing (ceramic white). No castShadow -- a small thin panel on the pole.
     h(
       'mesh',
-      { key: 'housing', position: [0, 1.0, 0], castShadow: true },
+      { key: 'housing', position: [0, 1.0, 0] },
       h('boxGeometry', { args: [0.56, 0.42, 0.08] }),
       matte(C.wall, 0.7),
     ),
@@ -325,9 +326,10 @@ export const Chair = memo(function Chair({ position = [0, 0, 0], rotation }: Pla
     [0.16, 0.12, -0.16],
   ];
   return h('group', { position, rotation }, [
+    // Seat: a thin flat slab -- no castShadow (keeps the ground read clean).
     h(
       'mesh',
-      { key: 'seat', position: [0, 0.26, 0], castShadow: true },
+      { key: 'seat', position: [0, 0.26, 0] },
       h('boxGeometry', { args: [0.42, 0.06, 0.42] }),
       matte(C.plastic, 0.8),
     ),
@@ -363,10 +365,11 @@ export const Plant = memo(function Plant({ position = [0, 0, 0] }: Placed) {
       h('cylinderGeometry', { args: [0.17, 0.13, 0.32, 16] }),
       matte(C.linen, 0.85),
     ),
+    // Foliage blobs: small and high up -- no castShadow (the pot grounds it).
     ...blobs.map((p, i) =>
       h(
         'mesh',
-        { key: `leaf-${i}`, position: p, castShadow: true },
+        { key: `leaf-${i}`, position: p },
         h('icosahedronGeometry', { args: [0.17, 0] }),
         matte(0x8fb9a3, 0.9),
       ),
