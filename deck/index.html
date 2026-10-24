@@ -121,169 +121,113 @@ section { position: relative; min-height: 100vh; padding: 130px 32px 100px; }
 .r.d4 { transition-delay: 360ms; }
 .r.d5 { transition-delay: 500ms; }
 
-/* ---------- HERO · a photograph of a printed newspaper on a dark desk ---------- */
-
-/* Newsprint colors (independent of the dark deck palette) */
+/* ---------- HERO · real newspaper clipping on a dark desk ---------- */
 #hero {
-  --paper:   #ECE4D1;    /* warm newsprint cream */
-  --paper-2: #E2D9C2;    /* darker fold shade */
-  --ink:     #1A1612;    /* warm near-black ink */
-  --ink-2:   #4A423A;    /* mid-grey ink */
-  --ink-dim: #80766A;    /* light caption grey */
-  --red-ink: #B8252E;    /* muted newsprint red */
-  --rule:    rgba(26,22,18,0.14);
-  --rule-strong: rgba(26,22,18,0.32);
-
   min-height: 100vh;
-  padding: 128px 40px 90px;
-  display: grid; place-items: center;
+  padding: 120px 40px 120px;
+  display: grid; grid-template-rows: 1fr auto;
+  align-items: center; justify-items: center;
   background:
     radial-gradient(1200px 700px at 50% 30%, rgba(255,255,255,0.03), transparent 65%),
-    radial-gradient(1800px 1200px at 50% 110%, rgba(255,45,74,0.04), transparent 65%),
+    radial-gradient(1800px 1200px at 50% 110%, rgba(255,45,74,0.05), transparent 65%),
     linear-gradient(180deg, #0A0A0C 0%, #050506 100%);
   position: relative; overflow: hidden;
 }
 
-/* The physical newspaper sheet. Tilt + shadow + grain. */
-#hero .paper {
+/* Three-column layout: punchline left · the clipping · caption right */
+#hero .exhibit {
   position: relative; z-index: 2;
-  width: min(1120px, 92vw);
-  background: var(--paper);
-  color: var(--ink);
-  padding: 60px 68px 72px;
-  transform: perspective(2400px) rotateX(1.6deg) rotateZ(-0.45deg);
-  transform-origin: 50% 100%;
-  box-shadow:
-    0 2px 0 rgba(0,0,0,0.08),
-    0 20px 40px -10px rgba(0,0,0,0.55),
-    0 60px 120px -40px rgba(0,0,0,0.75),
-    0 90px 180px -60px rgba(0,0,0,0.6);
-}
-
-/* Paper grain + fold shade overlay, non-interactive */
-#hero .paper::before {
-  content: ""; position: absolute; inset: 0; pointer-events: none;
-  opacity: .55; mix-blend-mode: multiply;
-  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='300' height='300'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.95' numOctaves='2' seed='7'/><feColorMatrix values='0 0 0 0 0.08  0 0 0 0 0.06  0 0 0 0 0.05  0 0 0 0.18 0'/></filter><rect width='100%25' height='100%25' filter='url(%23n)'/></svg>");
-}
-/* Soft horizontal fold crease */
-#hero .paper::after {
-  content: ""; position: absolute; inset: 0; pointer-events: none;
-  background:
-    linear-gradient(180deg, transparent 48%, rgba(26,22,18,.08) 50%, transparent 52%),
-    linear-gradient(90deg, rgba(26,22,18,.08) 0%, transparent 6%, transparent 94%, rgba(26,22,18,.08) 100%);
-  mix-blend-mode: multiply;
-}
-
-/* Masthead inside the paper */
-#hero .masthead {
+  width: 100%; max-width: 1360px;
   display: grid; grid-template-columns: 1fr auto 1fr;
-  align-items: baseline; gap: 20px;
-  padding: 0 0 14px;
-  border-bottom: 2px solid var(--ink);
-  font-family: var(--f-mono); font-size: 10px; letter-spacing: .22em;
-  text-transform: uppercase; color: var(--ink-2);
+  gap: 48px; align-items: center;
 }
-#hero .masthead .left  { text-align: left; }
-#hero .masthead .right { text-align: right; }
-#hero .masthead .nameplate {
-  font-family: var(--f-serif); font-style: normal; font-weight: 900;
-  font-size: clamp(26px, 3vw, 40px); line-height: 1;
-  letter-spacing: 0.005em; text-transform: none; color: var(--ink);
+
+/* Left side — our framing */
+#hero .frame-left { padding-right: 16px; }
+#hero .frame-left .kicker {
+  font-family: var(--f-mono); font-size: 11px; letter-spacing: .3em;
+  text-transform: uppercase; color: var(--red);
+  display: inline-flex; align-items: center; gap: 10px; margin-bottom: 24px;
+}
+#hero .frame-left .kicker::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--red); box-shadow: 0 0 10px var(--red); animation: beat 1.8s var(--ease) infinite; }
+#hero .frame-left h1 {
+  font-family: var(--f-sans); font-weight: 500;
+  font-size: clamp(28px, 3.4vw, 50px); line-height: 1.02; letter-spacing: -0.025em;
+  margin: 0; color: var(--ink);
+}
+#hero .frame-left h1 em { font-style: italic; color: var(--red); font-weight: 400; }
+#hero .frame-left .sub {
+  margin-top: 24px; max-width: 420px;
+  color: var(--ink-2); font-size: 15px; line-height: 1.55;
+}
+#hero .frame-left .sub b { color: var(--ink); font-weight: 500; }
+
+/* The clipping — real newspaper screenshot, tilted on the desk */
+#hero .clipping {
+  position: relative;
+  width: min(500px, 44vw);
+  background: #000;
+  border-radius: 2px;
+  overflow: hidden;
+  transform: perspective(2400px) rotateX(2deg) rotateZ(-0.9deg);
+  transform-origin: 50% 50%;
+  box-shadow:
+    0 2px 0 rgba(255,255,255,0.04) inset,
+    0 20px 50px -14px rgba(0,0,0,0.6),
+    0 60px 120px -40px rgba(0,0,0,0.8),
+    0 100px 180px -60px rgba(0,0,0,0.6);
+}
+#hero .clipping img { display: block; width: 100%; height: auto; }
+/* Subtle paper grain over the screenshot — makes it feel printed, not screenshotted */
+#hero .clipping::before {
+  content: ""; position: absolute; inset: 0; pointer-events: none;
+  opacity: .35; mix-blend-mode: multiply;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='300' height='300'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' seed='11'/><feColorMatrix values='0 0 0 0 0.06  0 0 0 0 0.05  0 0 0 0 0.04  0 0 0 0.14 0'/></filter><rect width='100%25' height='100%25' filter='url(%23n)'/></svg>");
+}
+/* A soft spotlight / vignette on the clipping */
+#hero .clipping::after {
+  content: ""; position: absolute; inset: 0; pointer-events: none;
+  background: radial-gradient(120% 100% at 50% -10%, rgba(255,255,255,0.08), transparent 55%),
+              radial-gradient(120% 100% at 50% 110%, rgba(0,0,0,0.35), transparent 55%);
+  mix-blend-mode: overlay;
+}
+
+/* Right side — attribution block styled like a museum/evidence tag */
+#hero .evidence-tag { padding-left: 16px; }
+#hero .evidence-tag .tag-label {
+  font-family: var(--f-mono); font-size: 10.5px; letter-spacing: .3em;
+  text-transform: uppercase; color: var(--ink-dim); margin-bottom: 14px;
+}
+#hero .evidence-tag .pub {
+  font-family: var(--f-serif); font-weight: 900; font-style: normal;
+  font-size: 32px; line-height: 1; color: var(--ink); margin-bottom: 4px;
   font-variation-settings: "opsz" 48;
 }
-#hero .masthead .nameplate em { font-style: italic; color: var(--red-ink); font-weight: 400; }
-
-/* Thin rule under the masthead for the double-line newspaper look */
-#hero .doubleline {
-  height: 2px; background: transparent;
-  border-bottom: 1px solid var(--ink);
-  margin: 3px 0 24px;
-}
-
-/* Kicker */
-#hero .kicker {
-  font-family: var(--f-mono); font-size: 11px; letter-spacing: .3em;
-  text-transform: uppercase; color: var(--red-ink);
-  display: inline-flex; align-items: center; gap: 10px;
-}
-#hero .kicker::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--red-ink); }
-
-/* Headline */
-#hero h1 {
-  margin: 18px 0 0;
-  font-family: var(--f-serif);
-  font-weight: 900; font-style: normal;
-  font-size: clamp(44px, 6.6vw, 108px);
-  line-height: .93; letter-spacing: -0.028em;
-  font-variation-settings: "opsz" 144, "SOFT" 0;
-  color: var(--ink);
-  max-width: 1000px;
-}
-#hero h1 em {
-  font-style: italic; color: var(--red-ink); font-weight: 400;
-  font-variation-settings: "opsz" 144, "SOFT" 100;
-}
-
-/* Deck */
-#hero .deck {
-  margin: 24px 0 0; max-width: 920px;
-  font-family: var(--f-serif); font-weight: 400; font-style: italic;
-  font-size: clamp(18px, 1.8vw, 24px); line-height: 1.42;
-  color: var(--ink-2);
-  padding: 18px 0 20px;
-  border-top: 1px solid var(--rule-strong);
-  border-bottom: 1px solid var(--rule);
-}
-#hero .deck em { color: var(--ink); font-style: italic; }
-
-/* Byline */
-#hero .byline {
-  margin-top: 18px;
-  display: flex; gap: 24px; flex-wrap: wrap; align-items: baseline;
-  font-family: var(--f-mono); font-size: 10.5px; letter-spacing: .2em;
+#hero .evidence-tag dl {
+  display: grid; grid-template-columns: 90px 1fr; row-gap: 10px; column-gap: 14px;
+  margin: 24px 0 0; font-family: var(--f-mono); font-size: 11.5px; letter-spacing: .14em;
   text-transform: uppercase; color: var(--ink-dim);
 }
-#hero .byline b { color: var(--ink); font-weight: 500; }
-
-/* Lede columns */
-#hero .columns {
-  margin-top: 32px;
-  columns: 2; column-gap: 44px; column-rule: 1px solid var(--rule);
-  font-family: var(--f-serif); font-weight: 400;
-  font-size: 15.5px; line-height: 1.55; color: var(--ink);
-  max-width: 1000px;
+#hero .evidence-tag dt { color: var(--ink-faint); }
+#hero .evidence-tag dd { margin: 0; color: var(--ink-2); }
+#hero .evidence-tag dd b { color: var(--ink); font-weight: 500; }
+#hero .evidence-tag .quote {
+  margin-top: 28px; padding-top: 20px; border-top: 1px solid var(--rule);
+  font-family: var(--f-serif); font-style: italic; font-weight: 400;
+  font-size: 20px; line-height: 1.4; color: var(--ink-2); max-width: 380px;
 }
-#hero .columns p { margin: 0 0 14px; break-inside: avoid; text-align: justify; hyphens: auto; }
-#hero .columns p:first-child::first-letter {
-  font-family: var(--f-serif); font-weight: 900; font-style: normal;
-  font-size: 4.6em; line-height: .88; float: left;
-  margin: 2px 10px -6px 0; color: var(--red-ink);
-  font-variation-settings: "opsz" 144;
-}
-#hero .columns b { color: var(--ink); font-weight: 700; }
-#hero .columns em { color: var(--red-ink); font-style: italic; font-weight: 400; }
+#hero .evidence-tag .quote em { color: var(--red); font-style: italic; }
 
-/* Caption below the paper, like a museum tag */
-#hero .caption {
-  position: relative; z-index: 2;
-  margin: 36px auto 0;
-  max-width: 820px; text-align: center;
-  font-family: var(--f-mono); font-size: 10.5px; letter-spacing: .22em;
-  text-transform: uppercase; color: #777779;
-}
-#hero .caption b { color: #BABABB; font-weight: 400; }
-
-/* ECG waveform — a faint pulse under the paper, outside its tilt */
+/* ECG waveform — a faint pulse under the clipping */
 .ecg-hero {
-  position: absolute; left: 0; right: 0; bottom: 58px; z-index: 1; pointer-events: none;
+  position: absolute; left: 0; right: 0; bottom: 50px; z-index: 1; pointer-events: none;
   mask-image: linear-gradient(90deg, transparent 0%, #000 15%, #000 85%, transparent 100%);
-  opacity: .36;
+  opacity: .38;
 }
 .ecg-hero svg { width: 100%; height: 90px; display: block; }
 .ecg-hero .trace {
-  fill: none; stroke: #FF2D4A; stroke-width: 1.2;
-  filter: drop-shadow(0 0 6px rgba(255,45,74,.55));
+  fill: none; stroke: var(--red); stroke-width: 1.2;
+  filter: drop-shadow(0 0 6px rgba(255,45,74,.6));
   stroke-dasharray: 4000; stroke-dashoffset: 4000;
   animation: ecgDraw 3.6s var(--ease) 600ms forwards;
 }
@@ -293,12 +237,20 @@ section { position: relative; min-height: 100vh; padding: 130px 32px 100px; }
 .scroll-cue {
   position: absolute; left: 50%; bottom: 22px; transform: translateX(-50%);
   font-family: var(--f-mono); font-size: 10.5px; letter-spacing: .3em;
-  text-transform: uppercase; color: #777779;
+  text-transform: uppercase; color: var(--ink-dim);
   display: flex; align-items: center; gap: 14px; z-index: 3;
 }
 .scroll-cue .key {
-  border: 1px solid #2B2B2E; border-radius: 3px;
-  padding: 2px 7px; color: #BABABB; letter-spacing: 0;
+  border: 1px solid var(--rule-strong); border-radius: 3px;
+  padding: 2px 7px; color: var(--ink-2); letter-spacing: 0;
+}
+
+/* Responsive: on narrow screens, stack the three columns */
+@media (max-width: 1180px) {
+  #hero .exhibit { grid-template-columns: 1fr; gap: 36px; max-width: 560px; }
+  #hero .frame-left, #hero .evidence-tag { padding: 0; text-align: center; }
+  #hero .evidence-tag dl { justify-content: center; max-width: 420px; margin-left: auto; margin-right: auto; }
+  #hero .evidence-tag .quote { margin-left: auto; margin-right: auto; }
 }
 
 /* ---------- THE LIE (section #lie) ---------- */
@@ -653,49 +605,41 @@ section { position: relative; min-height: 100vh; padding: 130px 32px 100px; }
     </svg>
   </div>
 
-  <article class="paper r in">
-    <!-- Masthead -->
-    <header class="masthead">
-      <span class="left">Vol. 1 · No. 42</span>
-      <span class="nameplate">The <em>Dispatch</em></span>
-      <span class="right">Health &amp; Security · Oct 2026</span>
-    </header>
-    <div class="doubleline"></div>
-
-    <!-- Kicker -->
-    <div class="kicker">Hospital cyberattacks · investigation</div>
-
-    <!-- Headline -->
-    <h1>
-      The device told the doctor<br>
-      the patient was fine.<br>
-      <em>The patient was not.</em>
-    </h1>
-
-    <!-- Deck -->
-    <p class="deck">
-      A new class of medical-device attack hides the alarm while the harm continues.
-      Hospitals have no tool that <em>finds, writes, and verifies the fix</em> at scale.
-      PreVent is the one we're shipping this week.
-    </p>
-
-    <!-- Byline -->
-    <div class="byline">
-      <span>By <b>The PreVent Team</b></span>
-      <span>San Francisco · Cal Hacks 13.0</span>
-      <span>Oct 24 · 2026</span>
+  <div class="exhibit">
+    <!-- Left: our framing -->
+    <div class="frame-left r in">
+      <div class="kicker">Exhibit A · the attack class is real</div>
+      <h1>
+        It has happened.<br>
+        We built the tool<br>
+        that would have <em>caught it</em>.
+      </h1>
+      <p class="sub">
+        <b>PreVent</b> is a pipeline of AI agents that finds the vulnerability, proves it with a working exploit, writes the fix, and brings the device back online — every step visible, every change signed off by a human.
+      </p>
     </div>
 
-    <!-- Lede columns -->
-    <div class="columns">
-      <p>In 2025 the FBI's Internet Crime Complaint Center recorded <b>460 cyberattacks against US hospitals</b>, nearly double the 249 counted two years earlier. Industry fleet surveys put the number of connected devices per bed between ten and fifteen, and <em>roughly half of them carry a critical vulnerability</em> that is already published and known.</p>
-      <p>The patch exists. Nobody writes it, nobody times the fix, and nobody proves the fix worked. FDA §524B, in effect since 2023, now makes a repeatable find-and-fix process a condition of clearing a cyber device for market — but the tooling to produce one, at device pace, still does not exist on the floor.</p>
-    </div>
-  </article>
+    <!-- Center: the real newspaper clipping -->
+    <figure class="clipping r in d1">
+      <img src="assets/paper-wired-patient-dies.png" alt="WIRED headline: A Patient Dies After a Ransomware Attack Hits a Hospital — Sep 19 2020, article by Dan Goodin, Ars Technica, photograph of UKD Universitätsklinikum Düsseldorf by Lukas Schulze/Getty Images">
+    </figure>
 
-  <p class="caption r in d2">
-    <b>Fig. 1</b> · PreVent · Cal Hacks 13.0 · a dispatch from the floor of the demo
-  </p>
+    <!-- Right: evidence tag -->
+    <aside class="evidence-tag r in d2">
+      <div class="tag-label">— Evidence —</div>
+      <div class="pub">WIRED</div>
+      <dl>
+        <dt>Reported</dt><dd>Sep&nbsp;19,&nbsp;<b>2020</b></dd>
+        <dt>Author</dt>  <dd>Dan&nbsp;Goodin · Ars&nbsp;Technica</dd>
+        <dt>Photo</dt>   <dd>Lukas&nbsp;Schulze / Getty&nbsp;Images</dd>
+        <dt>Target</dt>  <dd>Universitätsklinikum Düsseldorf</dd>
+        <dt>Vector</dt>  <dd>ransomware · VPN&nbsp;vuln (known)</dd>
+      </dl>
+      <p class="quote">
+        A patient died while a <em>known vulnerability</em> went unpatched. Our pitch isn't a hypothetical — it's a tool for the next one.
+      </p>
+    </aside>
+  </div>
 
   <div class="scroll-cue"><span class="key">←</span><span class="key">→</span><span>navigate</span></div>
 </section>
