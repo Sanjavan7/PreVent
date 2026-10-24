@@ -1,0 +1,24 @@
+# OS / editor
+.DS_Store
+.vscode/
+.idea/
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Node
+node_modules/
+.next/
+dist/
+build/
+
+# Secrets and local config
+.env
+.env.*
+!.env.example
+
+# Containers / logs
+*.log
