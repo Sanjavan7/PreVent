@@ -57,10 +57,11 @@ The device-service listens on **port 8071** (not 5000 — on macOS, AirPlay owns
 seams: [`docs/DEV2-SECURITY-DECISIONS.md`](docs/DEV2-SECURITY-DECISIONS.md).
 
 **Keys are optional.** The loop uses a cached PoC and deterministic triage when
-unset. Set `BITDEER_API_KEY` for live PoC generation, `ANTHROPIC_API_KEY` for
-live Claude triage narration (via Dev 1), `NVD_API_KEY` for a higher NVD rate
-limit (the CVE JSON is already cached). `FACTORY_API_KEY` is used by Dev 1's
-Droid patch stage, not the Dev 2 loop.
+unset. Set `FEATHERLESS_API_KEY` for live PoC generation (primary provider;
+`BITDEER_API_KEY` is the fallback — both serve `DeepSeek-V4.1-Flash-1017`),
+`ANTHROPIC_API_KEY` for live Claude triage narration (via Dev 1), `NVD_API_KEY`
+for a higher NVD rate limit (the CVE JSON is already cached). `FACTORY_API_KEY`
+is used by Dev 1's Droid patch stage, not the Dev 2 loop.
 
 ## Team workflow
 Shared `main` is the integration branch. Each dev works on a branch (`dev1/…`, `dev2/…`, `dev3/…`, `hw/…`) and opens a PR into `main`. **All code is written during the event.**

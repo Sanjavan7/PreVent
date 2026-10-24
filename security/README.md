@@ -98,8 +98,13 @@ SemGrep tests auto-skip if semgrep isn't installed.
 | `DEVICE_SERVICE_PATCHED` | `0` | `1` = patched reference handler |
 | `DEVICE_SERVICE_TOKEN` | *(empty)* | bearer token the patched handler requires |
 | `PREVENT_DEVICE_ROW_FILE` | *(unset)* | JSON sink for the source-of-truth row |
-| `BITDEER_API_KEY` | *(unset)* | live PoC generation; else cached PoC |
+| `FEATHERLESS_API_KEY` | *(unset)* | **primary** live PoC provider (verified HTTP 200) |
+| `FEATHERLESS_BASE_URL` | `https://api.featherless.ai/v1` | Featherless endpoint |
+| `BITDEER_API_KEY` | *(unset)* | secondary PoC provider; else cached PoC |
 | `NVD_API_KEY` | *(unset)* | higher NVD rate limit; cache already committed |
+
+GENERATE is provider-agnostic: it tries Featherless, then Bitdeer, then a
+pre-cached PoC. Both providers host `deepseek-ai/DeepSeek-V4.1-Flash-1017`.
 
 See [`docs/DEV2-SECURITY-DECISIONS.md`](../docs/DEV2-SECURITY-DECISIONS.md) for
 the design decisions and the Dev 1 / Dev 3 integration seams.

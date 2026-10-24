@@ -22,7 +22,7 @@ GROUND → SCAN → GENERATE → DELIVER → PATCH → VERIFY → RESTORE
 |---|---|---|
 | **GROUND** | Cite the real advisory (CVE-2019-6538, CWE-306) from NVD, cached locally | `security/ground/ground.py` |
 | **SCAN** | SemGrep (1 real CWE-306 finding) + Bandit (3 decoys); triage self-corrects onto the real one | `device-service/rules/missing-auth.yaml`, `security/scan/` |
-| **GENERATE** | Draft the PoC via Bitdeer (`DeepSeek-V4.1-Flash`), else a pre-cached PoC | `security/generate/exploit.py` |
+| **GENERATE** | Draft the PoC via any OpenAI-compatible provider (Featherless primary, Bitdeer fallback — both host `DeepSeek-V4.1-Flash-1017`), else a pre-cached PoC | `security/generate/exploit.py` |
 | **DELIVER** | Fire the **unauthenticated** payload: fan stops, patient crashes, device keeps reporting normal (the lie) | `security/deliver.py` |
 | **PATCH** | Deploy the patched service (bearer-token required, overrides ignored) — stands in for Factory Droid's diff | `device-service/app.py` (`DEVICE_SERVICE_PATCHED=1`) |
 | **VERIFY** | Re-send the **byte-identical** exploit; assert 401/403 + true_state unchanged + no lie (deterministic, non-AI) | `security/verify.py` |
@@ -247,10 +247,10 @@ would have manifested as "VERIFY passes even with no service running" — the wo
 kind of silent-green bug on stage.
 
 ### 3.13 Separation of duties + honesty framing
-The offensive and trust roles are split across *different models*: **Bitdeer**
-(`DeepSeek-V4.1-Flash`) writes the PoC; **Claude** does scan/triage/verify
-reasoning. That makes "a model reading untrusted input ≠ the model writing the
-exploit" a real separation, not a slogan. Honesty held throughout: the device is
+The offensive and trust roles are split across *different models*: an open model
+(**`DeepSeek-V4.1-Flash-1017`**, served by Featherless/Bitdeer) writes the PoC;
+**Claude** does scan/triage/verify reasoning. That makes "a model reading
+untrusted input ≠ the model writing the exploit" a real separation, not a slogan. Honesty held throughout: the device is
 a **localhost toy fan modeling CWE-306**, not a ventilator; CVE-2019-6538 is cited
 **read-only** for grounding; what's *real* (the agent loop, the SemGrep finding,
 the deterministic verifier, the true-vs-reported divergence) is kept distinct from
@@ -305,10 +305,18 @@ without semgrep.
 
 | Key | Needed for | If absent |
 |---|---|---|
+| `FEATHERLESS_API_KEY` | **Primary** live PoC generation in GENERATE | Falls through to Bitdeer, then cached PoC |
+| `BITDEER_API_KEY` | Secondary live PoC generation | Used only if Featherless fails; else cached. **Currently 402 (no balance)** |
 | `ANTHROPIC_API_KEY` | Live Claude reasoning in SCAN/VERIFY (Dev 1's `runStage`) | Deterministic triage runs instead |
-| `BITDEER_API_KEY` | Live PoC generation in GENERATE | Pre-cached PoC is used |
 | `NVD_API_KEY` | Higher NVD rate limit | Keyless works; cache already committed |
 | `FACTORY_API_KEY` | Dev 1's Droid patch stage | **Not a Dev 2 dependency** |
+
+> **GENERATE is provider-agnostic.** `_providers()` returns each configured
+> provider (one with a key set) and tries them in order — Featherless first
+> (verified live: HTTP 200, `DeepSeek-V4.1-Flash-1017`), then Bitdeer — each with
+> model fallbacks, then the pre-cached PoC. Bitdeer's key authenticates but the
+> hackathon credits weren't funded (HTTP 402 `insufficient_balance`), which is
+> why Featherless is primary. Both host the same DeepSeek model.
 
 Action items:
 - **Pin the scanners on the demo laptop.** The plan pins `semgrep==1.182.1` /
