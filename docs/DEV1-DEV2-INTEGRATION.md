@@ -110,9 +110,14 @@ Run on this Windows box, branch `dev1-pipeline-agents`:
 ### What still needs doing (honest list)
 - **Dev 3 realtime/hardware** — the dashboard + SpacetimeDB + physical fan.
   (`emulate_stream.py` already bridges the device row to serial frames with no board.)
-- **Live Claude narration + live Droid** — verified by design but not exercised
-  here (needs `ANTHROPIC_API_KEY` / `FACTORY_API_KEY`; narration is non-fatal and
-  uses opus-4-8, not opus-5-5, because 5-5 blocks this security content).
+- **Live Claude narration** — now exercised with a real `ANTHROPIC_API_KEY`: each
+  stage streams real reasoning that matches the deterministic result (SCAN explains
+  the triage choice, VERIFY confirms 401/patch-holds, the refusal beat narrates the
+  sandbox denial). Narration prompts describe the already-completed stage result
+  (they don't ask Claude to re-verify with no tools, which made it refuse). Non-fatal
+  and on opus-4-8, not opus-5-5 (5-5 blocks this security content). **Live Factory
+  Droid** (`FACTORY_API_KEY`) still runs the cached-fallback patch here; exercise the
+  real Droid path at the demo.
 - **Merge Israel's PR #2** (the `stage_api`/`emulate_stream` bridges) into `main`
   — currently integrated **locally** on this branch; GitHub says it merges cleanly.
 - **A couple of Dev 2-side robustness nits** (worth telling Israel): the Windows

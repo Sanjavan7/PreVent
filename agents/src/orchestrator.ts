@@ -395,16 +395,18 @@ export async function runPipelineOnce(
     'scan',
     {
       ...baseStageOptions(backend),
-      systemPrompt: 'You are the SCAN agent. Triage SemGrep/Bandit findings and pick the one real exploitable flaw.',
-      prompt: `Triage this static-analysis finding and decide if it is the real exploitable flaw: ${JSON.stringify(scanResult.finding)}`,
+      // Narration only: the triage engine (Dev 2) has ALREADY chosen the real
+      // finding and surfaced its reasoning trail as events. Asking Claude to
+      // re-decide with no tools makes it (correctly) refuse; instead have it
+      // restate the completed decision for the dashboard.
+      systemPrompt:
+        'You are the SCAN narration agent. The triage engine has ALREADY selected the one real exploitable finding and discarded the decoys. Do not re-run triage or use tools; in one sentence, explain the choice for the dashboard.',
+      prompt: `Triage already selected ${scanResult.finding.cveRef} (${scanResult.finding.claudeVerdict ?? 'missing authentication on POST /device/command, CWE-306'}) as the one real exploitable flaw, discarding the scanner decoys. In one sentence for the dashboard, say why this missing-authentication finding is the real one.`,
       // SECURITY-WORK MODEL CONSTRAINT: opus-5-5 (CLAUDE_MODELS.reasoning) blocks
       // this vuln-triage content, so use the Active opus-4-8 fallback instead.
       model: CLAUDE_MODELS.fallback,
       effort: 'medium',
-      // runStage auto-approves made-available built-ins under 'dontAsk'
-      // (verified in runStage.ts), so Read/Grep are usable here.
-      tools: ['Read', 'Grep'],
-      disallowedTools: ['Bash', 'WebFetch'],
+      tools: [],
       permissionMode: 'dontAsk',
     },
     backend,
@@ -545,7 +547,13 @@ export async function runPipelineOnce(
     'verify',
     {
       ...baseStageOptions(backend),
-      prompt: `Re-check the patched device-service and report whether the earlier missing-auth finding is now closed (an unauthenticated command should be rejected): ${verified.detail}`,
+      // Narration only: a DETERMINISTIC verifier (Dev 2) has already re-run the
+      // exploit and produced `verified.detail`. Claude has no tools here, so
+      // asking it to "re-check" makes it (correctly) refuse to assert a result
+      // it can't observe. Give it the finished result and have it restate it.
+      systemPrompt:
+        'You are the VERIFY narration agent. A deterministic verifier has ALREADY re-run the exploit and produced the result below. Do not attempt to re-verify or use tools; restate the given result in one sentence for the dashboard.',
+      prompt: `The deterministic verifier re-ran the byte-identical unauthenticated exploit against the now-patched device-service. Result: ${verified.detail}. In one sentence for the dashboard, state whether the missing-authentication hole is now closed.`,
       // SECURITY-WORK MODEL CONSTRAINT: opus-5-5 (CLAUDE_MODELS.reasoning) blocks
       // this content; use the Active opus-4-8 fallback instead.
       model: CLAUDE_MODELS.fallback,
@@ -568,7 +576,10 @@ export async function runPipelineOnce(
     'restore',
     {
       ...baseStageOptions(backend),
-      prompt: 'Confirm the device is restored to a healthy, patched state for the dashboard.',
+      // Narration only: the environment has ALREADY been reverted + reset above.
+      systemPrompt:
+        'You are the RESTORE narration agent. The environment has ALREADY been reverted and reset; do not attempt to verify or use tools. Restate the outcome in one sentence for the dashboard.',
+      prompt: 'The device-service has been reverted to its clean pre-patch (vulnerable) source and the device reset to a healthy baseline. In one sentence for the dashboard, confirm the environment is restored and ready for the next run.',
       model: CLAUDE_MODELS.cheap,
       effort: 'low',
       tools: [],
