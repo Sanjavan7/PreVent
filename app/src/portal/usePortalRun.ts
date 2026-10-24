@@ -188,7 +188,7 @@ export function usePortalRun(): PortalRun {
     // t0 — GROUND: cite the CVE, then the scanner fleet spawns.
     at(150, () => {
       setModel((m) => ({ ...m, ground: { id: GROUND.id, cwe: GROUND.cwe, cvss: GROUND.cvss, title: GROUND.title } }));
-      patchPhase('ground', { state: 'done', agentName: 'orchestrator', detail: `Grounded in ${GROUND.id} · ${GROUND.cwe} · CVSS ${GROUND.cvss}` });
+      patchPhase('ground', { state: 'done', agentName: 'orchestrator', detail: `Grounded in ${GROUND.id} — ${GROUND.cwe}, CVSS ${GROUND.cvss}` });
       log('ground', `Grounded in ${GROUND.id} (${GROUND.cwe}, CVSS ${GROUND.cvss}).`);
       patchPhase('scan', { state: 'active', agentName: 'scanner fleet', spawnCount: 4, confidence: 0.2, detail: 'Spawning four scanner agents across server + firmware.' });
     });

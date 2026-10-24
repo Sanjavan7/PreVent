@@ -106,19 +106,23 @@
   --radius-lg: 10px;
   --radius-pill: 999px;
 
-  /* ===== MOTION ===== */
-  --ease-out: cubic-bezier(0.22, 1, 0.36, 1); /* entrances, draw-in, settle */
-  --ease-state: cubic-bezier(0.4, 0, 0.2, 1); /* color/opacity micro-states */
-  --dur-micro: 120ms;
-  --dur-base: 220ms;
-  --dur-draw: 360ms;
-  --dur-settle: 600ms;
+  /* ===== MOTION — strong custom curves (default CSS easings feel weak) ===== */
+  --ease-out: cubic-bezier(0.23, 1, 0.32, 1); /* entrances, draw-in, settle */
+  --ease-in-out: cubic-bezier(0.77, 0, 0.175, 1); /* on-screen movement */
+  --ease-state: cubic-bezier(0.3, 0, 0, 1); /* color/opacity micro-states */
+  --dur-micro: 130ms;
+  --dur-base: 200ms;
+  --dur-draw: 280ms;
+  --dur-settle: 440ms;
 
-  /* ===== ELEVATION — one panel shadow (no consumer soft-glow cards) ===== */
-  --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.03);
+  /* ===== ELEVATION — rings, not borders (depth via shadow on dark glass) =====
+     Dark-mode depth shadows mostly vanish, so a hairline ring carries structure;
+     a faint lift separates the hero surface from the quiet rail. */
+  --ring:         0 0 0 1px oklch(1 0 0 / 0.055);
+  --ring-raised:  0 0 0 1px oklch(1 0 0 / 0.07), 0 1px 2px oklch(0 0 0 / 0.4), 0 8px 24px -14px oklch(0 0 0 / 0.6);
+  --shadow-card:  var(--ring);
 
   --animate-spin-slow: spin 0.8s linear infinite;
-  --animate-pulse-node: pulseNode 1.6s var(--ease-state) infinite;
 }
 
 /* ---------- Base ---------- */
@@ -146,40 +150,78 @@ body {
     transform: rotate(360deg);
   }
 }
-@keyframes pulseNode {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.55; }
+@keyframes pulseGem {
+  0%, 100% { box-shadow: 0 0 0 0 currentColor; opacity: 1; }
+  50% { box-shadow: 0 0 10px 1px currentColor; opacity: 0.85; }
+}
+/* A pulse of light travelling down an active trace (continuous, so a keyframe). */
+@keyframes traceFlow {
+  from { background-position: 0 -140%; }
+  to { background-position: 0 140%; }
+}
+/* Infrequent entrance: opacity + small blur + rise (better-ui values). */
+@keyframes enter {
+  from { opacity: 0; filter: blur(4px); transform: translateY(8px); }
+  to { opacity: 1; filter: blur(0); transform: translateY(0); }
 }
 
-/* ---------- Surfaces: instrument panel + legacy card alias ---------- */
+/* ---------- Surfaces: depth via ring, not border ---------- */
 .panel,
 .card {
   background: var(--color-surface);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-md);
-  box-shadow: var(--shadow-card);
+  border: 1px solid transparent; /* forced-colors mode repaints this */
+  border-radius: var(--radius-lg);
+  box-shadow: var(--ring);
 }
-.card--active {
-  border-color: var(--color-accent-border);
-}
-.card--alert {
-  border-color: var(--color-danger);
+/* The hero surface sits above the quiet rail. */
+.panel--raised {
+  background: color-mix(in oklab, var(--color-surface) 90%, #000);
+  box-shadow: var(--ring-raised);
 }
 
-/* Faint phosphor grid for the flow canvas (monitor-glass texture). */
+/* Faint phosphor grid for the flow canvas (monitor-glass texture). Masked so it
+   fades toward the edges instead of ending in a hard rectangle. */
 .grid-field {
-  background-color: var(--color-bg);
   background-image:
     linear-gradient(var(--color-grid) 1px, transparent 1px),
     linear-gradient(90deg, var(--color-grid) 1px, transparent 1px);
-  background-size: 28px 28px;
+  background-size: 32px 32px;
+  -webkit-mask-image: radial-gradient(130% 90% at 30% 10%, #000 55%, transparent 100%);
+  mask-image: radial-gradient(130% 90% at 30% 10%, #000 55%, transparent 100%);
 }
+
+/* The pipeline trace: a thin spine the stations hang on. */
+.trace {
+  width: 2px;
+  background: var(--color-wire);
+  border-radius: 2px;
+}
+.trace--active {
+  background-image: linear-gradient(to bottom, transparent, var(--color-wire-active), transparent);
+  background-size: 100% 220%;
+  background-repeat: no-repeat;
+  animation: traceFlow 1.15s linear infinite;
+}
+
+/* Status gem that sits on the trace. color-* set inline per state. */
+.gem {
+  width: 11px;
+  height: 11px;
+  border-radius: 50%;
+  background: currentColor;
+}
+.gem--live { animation: pulseGem 1.6s var(--ease-state) infinite; }
 
 /* Node glow helpers (the ONE place glow is allowed — live agents). */
 .glow-teal  { box-shadow: var(--glow-teal); }
 .glow-green { box-shadow: var(--glow-green); }
 .glow-red   { box-shadow: var(--glow-red); }
 .glow-amber { box-shadow: var(--glow-amber); }
+
+/* Infrequent entrance + press feedback (emil: scale 0.97, never scale 0). */
+.animate-enter { animation: enter var(--dur-draw) var(--ease-out) both; }
+.press { transition: transform var(--dur-micro) var(--ease-out); }
+.press:active:not(:disabled) { transform: scale(0.97); }
 
 /* ---------- Focus ring (visible, :focus-visible, offset) ---------- */
 :where(a, button, [role="button"], input, [tabindex]):focus-visible {
@@ -209,14 +251,12 @@ body {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .spinner {
-    animation: none;
-    border-top-color: var(--color-border-strong);
-  }
-  .state-transition {
-    transition-duration: 0.01ms;
-  }
+  .spinner { animation: none; border-top-color: var(--color-border-strong); }
+  .state-transition { transition-duration: 0.01ms; }
   .grid-field { background-image: none; }
+  .trace--active { animation: none; background: var(--color-wire-active); }
+  .gem--live { animation: none; }
+  .animate-enter { animation: none; }
 }
 
 /* ---------- react-diff-view: de-animated, two-color, only inside a disclosure ---------- */
