@@ -3,3 +3,5 @@
 # teammates don't need the `spacetime` CLI. Owner (Dev 3) regens on schema change.
 # Convex codegen (fallback backend)
 convex/_generated/
+
+.env.local
