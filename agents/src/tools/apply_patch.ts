@@ -13,6 +13,18 @@ import { z } from 'zod';
 
 const execFileAsync = promisify(execFile);
 
+/** Runs `git -C <dir> apply <args>` and reports ok/stderr instead of throwing,
+ * so the caller can decide (forward-apply vs already-applied vs real failure). */
+async function gitApplyOk(dir: string, args: string[]): Promise<{ ok: boolean; stderr: string }> {
+  try {
+    await execFileAsync('git', ['-C', dir, 'apply', ...args]);
+    return { ok: true, stderr: '' };
+  } catch (err) {
+    const stderr = (err as { stderr?: string }).stderr ?? (err instanceof Error ? err.message : String(err));
+    return { ok: false, stderr };
+  }
+}
+
 export interface ApplyPatchDeps {
   /** The device-service repo's own git repo (see PLAN-FOUNDATION). */
   deviceServiceDir: string;
@@ -38,17 +50,42 @@ export function createApplyPatchServer(deps: ApplyPatchDeps) {
         .describe('Must be true. This call only runs once the human-approval gate has allowed it.'),
     },
     async () => {
+      // An empty diff (e.g. the corrupt-cache no-op fallback) is a success no-op.
+      if (!deps.diff.trim()) {
+        applied = true;
+        return { content: [{ type: 'text' as const, text: 'No diff to apply (no-op).' }] };
+      }
+
       const dir = await mkdtemp(path.join(tmpdir(), 'prevent-patch-'));
       const diffPath = path.join(dir, 'patch.diff');
       await writeFile(diffPath, deps.diff, 'utf8');
 
-      // TODO(dev): `git apply --check` first and surface a structured error
-      // back to Claude (isError: true) instead of throwing, so a malformed
-      // cached-fallback diff doesn't crash the whole orchestrator run.
-      await execFileAsync('git', ['-C', deps.deviceServiceDir, 'apply', diffPath]);
-      applied = true;
+      // Prefer a clean forward apply (cached-fallback path: clean tree).
+      const forward = await gitApplyOk(deps.deviceServiceDir, ['--check', diffPath]);
+      if (forward.ok) {
+        await execFileAsync('git', ['-C', deps.deviceServiceDir, 'apply', diffPath]);
+        applied = true;
+        return { content: [{ type: 'text' as const, text: 'Patch applied to device-service.' }] };
+      }
 
-      return { content: [{ type: 'text' as const, text: 'Patch applied to device-service.' }] };
+      // Forward failed: the patch may ALREADY be in the tree (a real Droid run
+      // at AutonomyLevel.Low edits app.py directly). A clean reverse-check
+      // proves that - treat it as an applied no-op rather than re-applying.
+      const reverse = await gitApplyOk(deps.deviceServiceDir, ['--reverse', '--check', diffPath]);
+      if (reverse.ok) {
+        applied = true;
+        return { content: [{ type: 'text' as const, text: 'Patch already present in device-service (no-op).' }] };
+      }
+
+      // Neither forward nor reverse applies: surface a STRUCTURED error instead
+      // of throwing, so a bad diff degrades the APPLY stage (and the loop)
+      // rather than crashing the whole orchestrator run.
+      return {
+        isError: true,
+        content: [
+          { type: 'text' as const, text: `git apply failed: ${forward.stderr || 'patch does not apply'}` },
+        ],
+      };
     },
     { annotations: { destructiveHint: true, idempotentHint: false } },
   );
