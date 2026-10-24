@@ -3,374 +3,667 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>PreVent · v2 · one number per slide</title>
+<title>PreVent · v3 · pitch deck</title>
 <link rel="stylesheet" href="fonts.css">
 <style>
-  /* ========== Palette · Porsche-dark, cobalt rim-light ==========
-     Edit values here to re-theme the whole deck.                 */
+  /* ============================================================
+     Palette (edit only this block to re-theme the whole deck).
+     Matches the live app's accent so screenshots look native.
+     ============================================================ */
   :root {
-    --bg:          #020408;    /* near-pure black                    */
-    --bg-ink:      #000;       /* true black for ultra-deep shadow   */
-    --bg-glow:     #06101E;    /* subtle lift under the number       */
-    --accent:      #4FA3FF;    /* bright cobalt (the rim light)      */
-    --accent-deep: #1E6FD9;    /* deeper cobalt (base of glow)       */
+    --bg:          #040810;
+    --bg-2:        #0A1420;
+    --bg-3:        #0F1C2E;
+    --ink:         #E8EDF3;
+    --ink-2:       #B9C2CF;
+    --ink-dim:     rgba(232, 237, 243, 0.60);
+    --ink-faint:   rgba(232, 237, 243, 0.28);
+    --rule:        rgba(232, 237, 243, 0.09);
+    --rule-strong: rgba(232, 237, 243, 0.22);
+    --accent:      #4FA3FF;
+    --accent-deep: #1E6FD9;
     --accent-soft: rgba(79, 163, 255, 0.14);
-    --ink:         #EEF4FF;    /* cool white                         */
-    --ink-dim:     rgba(238, 244, 255, 0.55);
-    --ink-faint:   rgba(238, 244, 255, 0.22);
-    --rule:        rgba(238, 244, 255, 0.08);
-    --rule-strong: rgba(238, 244, 255, 0.18);
-    --danger:      #FF4452;    /* reserved: alarm, attack, crash     */
-    --ok:          #4ADE80;    /* reserved: patched, verified        */
-
+    --glass:       rgba(232, 237, 243, 0.035);
+    --glass-border:rgba(79, 163, 255, 0.26);
+    --danger:      #FF4452;
+    --danger-soft: rgba(255, 68, 82, 0.12);
+    --ok:          #4ADE80;
+    --warn:        #FFB84A;
+    --glow-sm:     0 0 18px rgba(79, 163, 255, 0.4);
+    --ease:        cubic-bezier(.2, .8, .2, 1);
     --f-display:   "Fraunces", Georgia, serif;
-    --f-italic:    "Instrument Serif", Georgia, serif;
+    --f-italic:    "Instrument Serif", "Fraunces", Georgia, serif;
     --f-sans:      "Geist", Arial, Helvetica, sans-serif;
     --f-mono:      "Geist Mono", "SF Mono", Menlo, monospace;
-    --ease:        cubic-bezier(.2, .8, .2, 1);
   }
-
   * { box-sizing: border-box; }
-  html, body { margin: 0; height: 100%; background: var(--bg-ink); overflow: hidden; }
+  html, body { margin: 0; height: 100%; background: #020409; overflow: hidden; }
   #scaler { position: absolute; inset: 0; display: grid; place-items: center; }
   #stage {
     width: 1600px; height: 900px; background: var(--bg); color: var(--ink);
     font-family: var(--f-sans); overflow: hidden; position: relative;
     transform-origin: center center;
-    box-shadow: 0 40px 120px rgba(0,0,0,0.8);
+    box-shadow: 0 40px 120px rgba(0,0,0,0.75);
   }
-  /* The deck is almost entirely dark. One tiny ambient wash makes the void feel lit, not flat. */
   .ambient { position: absolute; inset: 0; pointer-events: none;
-             background: radial-gradient(1800px 1200px at 50% 50%, rgba(30, 111, 217, 0.06), transparent 65%); }
+             background: radial-gradient(900px 620px at 82% 14%, rgba(79,163,255,.07), transparent 62%),
+                         radial-gradient(820px 600px at 6% 94%, rgba(30,111,217,.05), transparent 60%); }
 
-  /* ===== invisible navigation ===== */
-  .nav-hint { position: absolute; left: 56px; bottom: 36px; z-index: 30;
-              font-family: var(--f-mono); font-size: 10px; letter-spacing: .3em;
-              text-transform: uppercase; color: var(--ink-faint); }
-  .nav-hint b { color: var(--ink-dim); font-weight: 400; padding: 0 2px; }
-  .counter { position: absolute; right: 60px; bottom: 36px; z-index: 30;
-             font-family: var(--f-mono); font-size: 10px; letter-spacing: .3em;
-             text-transform: uppercase; color: var(--ink-faint); }
-  .counter b { color: var(--ink); font-weight: 500; }
-  .brand { position: absolute; top: 36px; left: 56px; z-index: 30;
-           font-family: var(--f-italic); font-style: italic; font-size: 20px;
-           color: var(--ink-dim); letter-spacing: 0; }
-  .brand em { font-style: italic; color: var(--accent); }
-  .act { position: absolute; top: 40px; right: 60px; z-index: 30;
-         font-family: var(--f-mono); font-size: 10px; letter-spacing: .3em;
-         text-transform: uppercase; color: var(--ink-faint); }
+  /* ===== Frame chrome ===== */
+  .progress { position: absolute; top: 0; left: 0; right: 0; height: 2px;
+              background: rgba(232,237,243,.06); z-index: 25; }
+  .progress i { display: block; height: 100%; width: 0; background: var(--accent);
+                box-shadow: var(--glow-sm); transition: width 520ms var(--ease); }
+  .topbar { position: absolute; top: 28px; left: 130px; right: 62px; z-index: 20;
+            display: flex; justify-content: space-between; align-items: center;
+            font-family: var(--f-mono); font-size: 10.5px; letter-spacing: .24em;
+            text-transform: uppercase; color: var(--ink-dim); }
+  .brand { display: flex; align-items: center; gap: 14px; }
+  .brand .logo { font-family: var(--f-italic); font-style: italic; font-size: 21px;
+                 letter-spacing: 0; text-transform: none; color: var(--accent); }
+  .brand .sep { width: 1px; height: 14px; background: var(--rule-strong); }
+  .keys b { font-weight: 400; border: 1px solid var(--rule-strong); border-radius: 3px;
+            padding: 1px 5px; margin: 0 2px; color: var(--ink-2); font-size: 10px; }
+  .rail { position: absolute; left: 54px; top: 112px; bottom: 112px; width: 26px; z-index: 20; }
+  .rail::before { content: ""; position: absolute; top: 0; bottom: 0; left: 50%;
+                  width: 1px; background: var(--rule); }
+  .rail .tick { position: absolute; left: 50%; width: 5px; height: 5px; margin: -2.5px 0 0 -2.5px;
+                border-radius: 50%; background: var(--ink-faint); }
+  .rail .pulse { position: absolute; left: 50%; top: 0; width: 10px; height: 10px;
+                 margin: -5px 0 0 -5px; border-radius: 50%; background: var(--accent);
+                 box-shadow: 0 0 10px rgba(79,163,255,.9); transition: top 620ms var(--ease); }
+  .vtext { position: absolute; right: 22px; top: 112px; bottom: 112px; writing-mode: vertical-rl;
+           text-align: center; z-index: 20; font-family: var(--f-mono); font-size: 10px;
+           letter-spacing: .42em; text-transform: uppercase; color: var(--ink-faint); }
+  .hud { position: absolute; left: 130px; right: 62px; bottom: 24px; z-index: 24;
+         display: flex; align-items: center; gap: 28px; font-family: var(--f-mono);
+         font-size: 10.5px; letter-spacing: .24em; text-transform: uppercase; color: var(--ink-dim); }
+  .hud .count b { color: var(--ink); font-weight: 500; }
+  .ticker { flex: 1; overflow: hidden; white-space: nowrap; color: var(--ink-faint);
+            -webkit-mask-image: linear-gradient(90deg, transparent, #000 8%, #000 92%, transparent);
+                    mask-image: linear-gradient(90deg, transparent, #000 8%, #000 92%, transparent); }
+  .ticker .track { display: inline-block; animation: tick 48s linear infinite; }
+  .ticker .track span { margin-right: 44px; }
+  .ticker .track span::before { content: "✦"; color: var(--accent); margin-right: 12px;
+                                font-size: 8px; vertical-align: 2px; }
+  @keyframes tick { from { transform: translateX(0); } to { transform: translateX(-50%); } }
+  .nav { display: flex; gap: 8px; }
+  .nav button { width: 30px; height: 30px; border-radius: 50%; border: 1px solid var(--rule-strong);
+                background: transparent; color: var(--ink-2); font-size: 14px; cursor: pointer;
+                transition: color 180ms var(--ease), border-color 180ms var(--ease); }
+  .nav button:hover { border-color: var(--accent); color: var(--accent); }
 
-  /* ===== slide mechanics ===== */
-  .slide { position: absolute; inset: 0; z-index: 5;
+  /* ===== Slide mechanics ===== */
+  .slide { position: absolute; inset: 0; padding: 112px 110px 104px 130px; z-index: 5;
            opacity: 0; pointer-events: none;
-           transform: scale(1.015); filter: blur(10px);
-           transition: opacity 620ms var(--ease), transform 820ms var(--ease), filter 820ms var(--ease); }
+           transform: translateX(40px) scale(.995); filter: blur(6px);
+           transition: opacity 520ms var(--ease), transform 620ms var(--ease), filter 620ms var(--ease); }
+  .slide.prev { transform: translateX(-40px) scale(.995); }
   .slide.active { opacity: 1; transform: none; filter: none; pointer-events: auto; }
   .slide .reveal { opacity: 0; }
-  .slide.active .reveal { animation: rise 900ms var(--ease) both; }
-  .slide.active .r1 { animation-delay:  80ms; }
-  .slide.active .r2 { animation-delay: 240ms; }
-  .slide.active .r3 { animation-delay: 420ms; }
-  .slide.active .r4 { animation-delay: 620ms; }
-  .slide.active .r5 { animation-delay: 840ms; }
-  @keyframes rise { from { opacity: 0; transform: translateY(22px); filter: blur(6px); }
-                    to   { opacity: 1; transform: none; filter: none; } }
+  .slide.active .reveal { animation: reveal 820ms var(--ease) both; }
+  .slide.active .r1 { animation-delay:  60ms; }  .slide.active .r2 { animation-delay: 160ms; }
+  .slide.active .r3 { animation-delay: 270ms; } .slide.active .r4 { animation-delay: 380ms; }
+  .slide.active .r5 { animation-delay: 490ms; } .slide.active .r6 { animation-delay: 600ms; }
+  .slide.active .r7 { animation-delay: 710ms; }
+  @keyframes reveal { from { opacity: 0; transform: translateY(16px); filter: blur(5px); }
+                      to   { opacity: 1; transform: none; filter: none; } }
 
-  /* ===== the hero-number layout ===== */
-  /* Every number-driven slide uses this. Number eats the canvas. */
-  .num-slide { display: grid; grid-template-rows: 1fr auto; height: 100%; padding: 110px 90px 110px; position: relative; }
-  .num-slide .eyebrow { font-family: var(--f-mono); font-size: 12px; letter-spacing: .32em;
-                        text-transform: uppercase; color: var(--accent); }
-  .num-slide .eyebrow::before { content: ""; display: inline-block; width: 32px; height: 1px;
-                                background: var(--accent); vertical-align: 4px; margin-right: 14px; opacity: .7; }
-  .num-slide .hero-wrap { position: relative; display: grid; place-items: center; }
-  /* The rim-light glow sits BEHIND the number, matched in size. */
-  .num-slide .hero-wrap::before {
-    content: ""; position: absolute; inset: -40px -20% -40px -20%;
-    background: radial-gradient(60% 55% at 50% 50%, var(--accent-soft), transparent 70%);
-    pointer-events: none; z-index: 0;
-  }
-  .hero {
-    font-family: var(--f-italic); font-style: italic;
-    font-size: 520px; line-height: .85; letter-spacing: -.025em;
-    color: var(--ink); position: relative; z-index: 1;
-    text-shadow: 0 20px 80px rgba(30, 111, 217, 0.35);
-  }
-  .hero em { font-style: italic; color: var(--accent); }
-  .hero .u { /* unit */
-    font-family: var(--f-mono); font-style: normal; font-size: 36px;
-    letter-spacing: .18em; text-transform: uppercase; color: var(--ink-dim);
-    vertical-align: 120px; margin-left: 14px;
-  }
-  .hero.sm { font-size: 360px; }
-  .hero.xs { font-size: 260px; }
-  .num-slide .foot { display: grid; grid-template-columns: 1fr auto; gap: 40px; align-items: end; }
-  .num-slide .caption { font-family: var(--f-italic); font-style: italic; font-size: 28px;
-                        line-height: 1.3; color: var(--ink-dim); max-width: 760px; }
-  .num-slide .caption em { color: var(--ink); font-style: italic; }
-  .num-slide .caption.danger em { color: var(--danger); }
-  .num-slide .caption.ok em     { color: var(--ok); }
-  .num-slide .source { font-family: var(--f-mono); font-size: 10.5px; letter-spacing: .22em;
-                       text-transform: uppercase; color: var(--ink-faint); text-align: right; max-width: 320px; line-height: 1.6; }
+  /* ===== Typography primitives ===== */
+  .eyebrow { font-family: var(--f-mono); font-size: 12.5px; letter-spacing: .3em; text-transform: uppercase;
+             color: var(--accent); display: flex; align-items: center; gap: 14px; margin-bottom: 26px; }
+  .eyebrow::before { content: ""; width: 34px; height: 1px; background: var(--accent); opacity: .7; }
+  .lab { font-family: var(--f-mono); font-size: 11px; letter-spacing: .26em; text-transform: uppercase;
+         color: var(--accent); margin-bottom: 12px; }
+  .mono { font-family: var(--f-mono); font-size: 10.5px; letter-spacing: .24em; text-transform: uppercase; color: var(--ink-faint); }
+  .pill { display: inline-flex; align-items: center; gap: 8px; font-family: var(--f-mono); font-size: 10.5px;
+          letter-spacing: .22em; text-transform: uppercase; color: var(--accent);
+          border: 1px solid var(--glass-border); border-radius: 999px; padding: 6px 13px; background: var(--accent-soft); }
+  .pill.ghost  { background: transparent; color: var(--ink-2); border-color: var(--rule-strong); }
+  .pill.danger { color: var(--danger); border-color: rgba(255,68,82,.4); background: var(--danger-soft); }
+  .pill .dot   { width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
 
-  /* ===== slide variants that aren't just a number ===== */
-  .text-slide { display: grid; place-items: center; height: 100%; padding: 110px 160px; text-align: center; }
-  .text-slide .mega { font-family: var(--f-italic); font-style: italic; font-size: 160px;
-                      line-height: .95; letter-spacing: -.015em; color: var(--ink); max-width: 1200px; }
-  .text-slide .mega em { color: var(--accent); font-style: italic; }
-  .text-slide .sub { font-family: var(--f-italic); font-style: italic; font-size: 26px;
-                     line-height: 1.4; color: var(--ink-dim); max-width: 820px; margin-top: 48px; }
-  .text-slide .pre { font-family: var(--f-mono); font-size: 12px; letter-spacing: .32em;
-                     text-transform: uppercase; color: var(--accent); margin-bottom: 40px; }
+  /* Image frame with corner brackets (NightOwl treatment) */
+  .frame { position: relative; border: 1px solid var(--glass-border); border-radius: 4px;
+           overflow: hidden; background: #040810; }
+  .frame img { display: block; width: 100%; height: 100%; object-fit: contain; }
+  .frame.cover img { object-fit: cover; }
+  .frame .tag { position: absolute; top: 14px; right: 14px; font-family: var(--f-mono); font-size: 10px;
+                letter-spacing: .2em; text-transform: uppercase; color: var(--accent);
+                border: 1px solid var(--glass-border); background: rgba(0,0,0,.55);
+                padding: 4px 8px; border-radius: 3px; z-index: 2; }
+  .frame .tag.danger { color: var(--danger); border-color: rgba(255,68,82,.4); }
+  .corner { position: absolute; width: 14px; height: 14px; border-color: var(--accent);
+            border-style: solid; opacity: .8; z-index: 2; }
+  .corner.tl { top: 8px; left: 8px; border-width: 1px 0 0 1px; }
+  .corner.tr { top: 8px; right: 8px; border-width: 1px 1px 0 0; }
+  .corner.bl { bottom: 8px; left: 8px; border-width: 0 0 1px 1px; }
+  .corner.br { bottom: 8px; right: 8px; border-width: 0 1px 1px 0; }
 
-  /* "LIVE DEMO" slide — one giant marker */
-  .live-slide { display: grid; place-items: center; height: 100%; position: relative; }
-  .live-slide .word { font-family: var(--f-italic); font-style: italic; font-size: 400px;
-                      letter-spacing: -.03em; line-height: 1; color: var(--accent);
-                      text-shadow: 0 0 100px rgba(79,163,255,.5), 0 0 40px rgba(79,163,255,.6); }
-  .live-slide .ring { position: absolute; width: 14px; height: 14px; border-radius: 50%;
-                      background: var(--danger); top: 48%; right: calc(50% + 240px);
-                      box-shadow: 0 0 24px var(--danger); animation: beat 1.4s var(--ease) infinite; }
-  @keyframes beat { 0%, 70%, 100% { transform: scale(1); opacity: 1; }
-                    35%           { transform: scale(1.55); opacity: .5; } }
-  .live-slide .caption { position: absolute; bottom: 160px; left: 50%; transform: translateX(-50%);
-                         font-family: var(--f-italic); font-style: italic; font-size: 30px;
-                         color: var(--ink-dim); letter-spacing: 0; }
+  /* ============================================================
+     SLIDE 1 · Cold open — asymmetric hero + screenshot cutout
+     ============================================================ */
+  .hero-left { position: absolute; left: 130px; top: 196px; width: 760px; z-index: 2; }
+  .hero-chips { display: flex; align-items: center; gap: 14px; }
+  .title { font-family: var(--f-display); font-weight: 900; font-size: 164px; line-height: .9;
+           letter-spacing: -.038em; margin: 30px 0 0; white-space: nowrap;
+           font-variation-settings: "opsz" 144; }
+  .title .t2 { font-family: var(--f-italic); font-style: italic; font-weight: 400;
+               color: var(--accent); letter-spacing: -.01em; margin-left: 8px;
+               text-shadow: 0 0 70px rgba(79,163,255,.35); }
+  .hero-rule { width: 300px; height: 1px; background: var(--rule-strong); margin: 34px 0 26px; }
+  .hero-sub { margin: 0; font-family: var(--f-italic); font-style: italic; font-size: 34px; line-height: 1.2; }
+  .hero-sub em { color: var(--accent); }
+  .hero-sub span { display: block; font-family: var(--f-sans); font-style: normal; font-size: 17px;
+                   color: var(--ink-dim); margin-top: 14px; max-width: 580px; line-height: 1.55; }
+  .hero-art { position: absolute; right: 110px; top: 150px; width: 440px; height: 620px; z-index: 1; }
+  .hero-art::before { content: ""; position: absolute; inset: -30px; z-index: -1;
+                      background: radial-gradient(closest-side, rgba(79,163,255,.14), transparent 70%); }
+  .meta { position: absolute; left: 130px; right: 110px; bottom: 112px; display: grid;
+          grid-template-columns: 1fr 1fr 1fr 1.6fr; gap: 30px;
+          border-top: 1px solid var(--rule); padding-top: 16px; }
+  .meta b { display: block; font-family: var(--f-mono); font-weight: 400; font-size: 12px;
+            letter-spacing: .2em; text-transform: uppercase; color: var(--ink-2); margin-top: 6px; }
 
-  /* "200 → 401" moment-of-truth slide */
-  .truth-slide { display: grid; place-items: center; height: 100%; padding: 110px 90px; }
-  .truth { display: flex; align-items: baseline; gap: 70px;
-           font-family: var(--f-italic); font-style: italic; font-size: 300px; letter-spacing: -.02em; line-height: 1; }
-  .truth .bad  { color: var(--danger); text-shadow: 0 0 60px rgba(255, 68, 82, 0.3); }
-  .truth .good { color: var(--ok);     text-shadow: 0 0 60px rgba(74, 222, 128, 0.3); }
-  .truth .arrow { color: var(--accent); font-size: 180px; opacity: .75; }
-  .truth-slide .ctx { margin-top: 72px; font-family: var(--f-mono); font-size: 14px;
-                      letter-spacing: .22em; text-transform: uppercase; color: var(--ink-dim); text-align: center; max-width: 1000px; line-height: 1.9; }
-  .truth-slide .ctx em { color: var(--accent); font-style: normal; }
+  /* ============================================================
+     SLIDE 2 · The lie — screenshot + 3 observation cards
+     ============================================================ */
+  .lie-head { font-family: var(--f-italic); font-style: italic; font-weight: 400; font-size: 56px;
+              line-height: 1; margin: 0; max-width: 1100px; }
+  .lie-head em { color: var(--danger); font-style: italic; }
+  .lie-wrap { position: absolute; left: 130px; right: 110px; top: 304px; bottom: 160px;
+              display: grid; grid-template-columns: 480px 1fr; gap: 48px; }
+  .lie-wrap .frame { height: 100%; min-height: 0; }
+  .lie-wrap .frame img { object-position: 50% 50%; }
+  .lie-notes { display: flex; flex-direction: column; justify-content: space-between; min-height: 0; }
+  .lie-note { border-top: 1px solid var(--rule-strong); padding-top: 16px; }
+  .lie-note .k { font-family: var(--f-mono); font-size: 10.5px; letter-spacing: .24em;
+                 text-transform: uppercase; color: var(--ink-dim); }
+  .lie-note .v { font-family: var(--f-italic); font-style: italic; font-size: 34px; line-height: 1.05; margin-top: 10px; color: var(--ink); }
+  .lie-note .v em { font-style: italic; }
+  .lie-note.ok  .v em { color: var(--ok); }
+  .lie-note.bad .v em { color: var(--danger); }
+  .lie-note .n { font-family: var(--f-sans); font-size: 14px; color: var(--ink-dim); margin-top: 6px; line-height: 1.5; }
+  .lie-foot { position: absolute; left: 130px; right: 110px; bottom: 112px; display: flex;
+              justify-content: space-between; align-items: baseline;
+              border-top: 1px solid var(--rule); padding-top: 18px; }
+  .lie-foot .verdict { font-family: var(--f-italic); font-style: italic; font-size: 26px; color: var(--ink-2); }
+  .lie-foot .verdict em { color: var(--danger); font-style: italic; }
 
-  /* Team slide — four names, no bios */
-  .team-slide { display: grid; place-items: center; height: 100%; padding: 110px 100px; }
-  .team-slide .mega { font-family: var(--f-italic); font-style: italic; font-size: 100px;
-                      letter-spacing: -.015em; color: var(--ink); text-align: center; margin-bottom: 70px; }
-  .team-slide .mega em { color: var(--accent); font-style: italic; }
-  .team-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 24px; width: 100%; max-width: 1360px; }
-  .team-grid .p { padding: 32px 28px; border: 1px solid var(--rule-strong); border-radius: 10px;
-                  background: linear-gradient(180deg, rgba(79,163,255,0.04), transparent 70%); }
-  .team-grid .p .n { font-family: var(--f-italic); font-style: italic; font-size: 32px; color: var(--ink); line-height: 1.05; }
-  .team-grid .p .r { font-family: var(--f-mono); font-size: 10.5px; letter-spacing: .22em;
-                     text-transform: uppercase; color: var(--accent); margin-top: 12px; }
-  .team-grid .p .b { font-family: var(--f-sans); font-size: 12.5px; color: var(--ink-dim); margin-top: 14px; line-height: 1.5; }
+  /* ============================================================
+     SLIDE 3 · The scale — two big stats (NightOwl .duo)
+     ============================================================ */
+  .duo { position: absolute; left: 130px; right: 110px; bottom: 122px; display: grid;
+         grid-template-columns: 1fr 1fr; gap: 60px; }
+  .duo .st { border-top: 1px solid var(--rule-strong); padding-top: 22px; }
+  .duo .n { font-family: var(--f-display); font-weight: 900; font-size: 180px; line-height: .9;
+            letter-spacing: -.04em; }
+  .duo .n.acc { color: var(--accent); text-shadow: 0 0 60px rgba(79,163,255,.22); }
+  .duo .n small { font-size: 42px; font-weight: 700; color: var(--ink-dim); margin-left: 4px; letter-spacing: -.03em; }
+  .duo .d { font-family: var(--f-italic); font-style: italic; font-size: 32px; line-height: 1.15;
+            margin-top: 22px; max-width: 580px; color: var(--ink); }
+  .duo .d em { color: var(--accent); }
+  .duo .src { margin-top: 16px; font-family: var(--f-mono); font-size: 10.5px; letter-spacing: .22em;
+              text-transform: uppercase; color: var(--ink-faint); }
+  .scale-head { font-family: var(--f-italic); font-style: italic; font-weight: 400; font-size: 60px;
+                line-height: 1; margin: 0; max-width: 1200px; }
+  .scale-head em { color: var(--accent); font-style: italic; }
 
-  /* "the loop" slide — minimal nodes, Porsche-sparse */
-  .loop-slide { display: grid; place-items: center; height: 100%; padding: 110px 100px; }
-  .loop-slide .mega { font-family: var(--f-italic); font-style: italic; font-size: 90px;
-                      color: var(--ink); margin-bottom: 70px; text-align: center; max-width: 1200px; line-height: 1; }
-  .loop-slide .mega em { color: var(--accent); font-style: italic; }
-  .loop-row { display: flex; align-items: center; gap: 18px; }
-  .loop-row .node { font-family: var(--f-mono); font-size: 12px; letter-spacing: .22em;
-                    text-transform: uppercase; color: var(--ink-dim); padding: 14px 18px;
-                    border: 1px solid var(--rule-strong); border-radius: 999px; }
-  .loop-row .node.gate { color: var(--accent); border-color: var(--accent); background: var(--accent-soft);
-                         box-shadow: 0 0 24px rgba(79,163,255,.25); }
-  .loop-row .arrow { color: var(--ink-faint); font-family: var(--f-mono); font-size: 14px; }
+  /* ============================================================
+     SLIDE 4 · One loop — pipeline diagram
+     ============================================================ */
+  .loop-head { font-family: var(--f-italic); font-style: italic; font-weight: 400; font-size: 68px;
+               line-height: 1; margin: 0; max-width: 1200px; }
+  .loop-head em { color: var(--accent); font-style: italic; }
+  .loop-head sub { font-family: var(--f-sans); font-size: 17px; display: block; color: var(--ink-dim);
+                   font-style: normal; max-width: 820px; margin-top: 22px; line-height: 1.55; letter-spacing: 0; }
+  .loop-row { position: absolute; left: 130px; right: 110px; top: 400px; display: grid;
+              grid-template-columns: repeat(7, 1fr); gap: 10px; align-items: start; }
+  .loop-row::before { content: ""; position: absolute; left: 7%; right: 7%; top: 32px;
+                      border-top: 1px dashed var(--rule-strong); z-index: 0; }
+  .loop-node { position: relative; z-index: 1; display: flex; flex-direction: column; align-items: center; text-align: center; padding-top: 46px; }
+  .loop-node .dot { position: absolute; top: 24px; left: 50%; transform: translateX(-50%);
+                    width: 17px; height: 17px; border-radius: 50%; background: var(--bg);
+                    border: 1px solid var(--accent); display: grid; place-items: center; }
+  .loop-node .dot::after { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--accent); }
+  .loop-node.gate .dot { box-shadow: 0 0 18px rgba(79,163,255,.8); }
+  .loop-node .num { font-family: var(--f-mono); font-size: 10px; letter-spacing: .22em; color: var(--ink-faint); }
+  .loop-node h3 { font-family: var(--f-italic); font-style: italic; font-weight: 400; font-size: 28px; margin: 8px 0 10px; line-height: 1; }
+  .loop-node.gate h3 { color: var(--accent); }
+  .loop-node p { margin: 0; font-size: 13px; color: var(--ink-dim); line-height: 1.5; max-width: 170px; }
+  .loop-foot { position: absolute; left: 130px; right: 110px; bottom: 118px;
+               border-top: 1px solid var(--rule); padding-top: 18px;
+               font-family: var(--f-italic); font-style: italic; font-size: 26px; color: var(--ink-2); display: flex; justify-content: space-between; align-items: baseline; gap: 40px; }
+  .loop-foot em { color: var(--accent); }
 
-  /* "cold open" title slide */
-  .cold-slide { display: grid; place-items: center; height: 100%; position: relative;
-                background: radial-gradient(900px 600px at 50% 42%, rgba(30, 111, 217, 0.14), transparent 65%); }
-  .cold-slide .pre { font-family: var(--f-mono); font-size: 11.5px; letter-spacing: .36em;
-                     text-transform: uppercase; color: var(--accent); margin-bottom: 54px; }
-  .cold-slide .pre::before { content: ""; display: inline-block; width: 10px; height: 10px; border-radius: 50%;
-                             background: var(--danger); margin-right: 14px; vertical-align: 0;
-                             box-shadow: 0 0 12px var(--danger); animation: beat 1.6s var(--ease) infinite; }
-  .cold-slide .mark { font-family: var(--f-italic); font-style: italic; font-size: 220px;
-                      line-height: .9; color: var(--ink); letter-spacing: -.02em;
-                      text-shadow: 0 0 120px rgba(79,163,255,.3); }
-  .cold-slide .mark em { color: var(--accent); font-style: italic; }
-  .cold-slide .caption { position: absolute; bottom: 150px; left: 50%; transform: translateX(-50%);
-                         font-family: var(--f-italic); font-style: italic; font-size: 32px;
-                         color: var(--ink-dim); max-width: 900px; text-align: center; line-height: 1.3; }
+  /* ============================================================
+     SLIDE 5 · The AI at work — dashboard + spec list
+     ============================================================ */
+  .ai-left { position: absolute; left: 130px; top: 196px; bottom: 160px; width: 780px; }
+  .ai-left .frame { height: 100%; }
+  .ai-left .frame img { object-position: 50% 20%; }
+  .ai-right { position: absolute; left: 950px; right: 110px; top: 170px; }
+  .ai-right h2 { font-family: var(--f-italic); font-style: italic; font-weight: 400; font-size: 52px;
+                 line-height: 1.03; margin: 0 0 10px; letter-spacing: -.005em; }
+  .ai-right h2 em { color: var(--accent); font-style: italic; }
+  .ai-right .lede { font-size: 16px; color: var(--ink-dim); max-width: 520px; margin: 0 0 28px; line-height: 1.55; }
+  .specs { list-style: none; margin: 10px 0 0; padding: 0; }
+  .specs li { display: grid; grid-template-columns: 54px 1fr; gap: 14px;
+              padding: 15px 0; border-top: 1px solid var(--rule); align-items: baseline; }
+  .specs .idx { font-family: var(--f-italic); font-style: italic; font-size: 32px; line-height: 1; color: var(--accent); }
+  .specs .lb  { font-family: var(--f-mono); font-size: 10.5px; letter-spacing: .22em; text-transform: uppercase; color: var(--accent); margin-bottom: 4px; }
+  .specs p    { margin: 0; font-size: 18px; line-height: 1.4; color: var(--ink-2); }
+  .specs p b  { color: var(--ink); font-weight: 500; }
+
+  /* ============================================================
+     SLIDE 6 · The proof — 200 → 401 with context card
+     ============================================================ */
+  .proof-head { font-family: var(--f-italic); font-style: italic; font-weight: 400; font-size: 56px;
+                margin: 0; line-height: 1; letter-spacing: -.005em; max-width: 1100px; }
+  .proof-head em { color: var(--accent); }
+  .proof-row { position: absolute; left: 130px; right: 110px; top: 304px; display: grid;
+               grid-template-columns: 1fr 440px; gap: 60px; align-items: center; }
+  .proof-nums { display: flex; align-items: baseline; gap: 44px; justify-content: center;
+                font-family: var(--f-display); font-weight: 900; font-size: 220px; line-height: .95;
+                letter-spacing: -.04em; }
+  .proof-nums .bad  { color: var(--danger); text-shadow: 0 0 60px rgba(255,68,82,.25); }
+  .proof-nums .good { color: var(--ok);     text-shadow: 0 0 60px rgba(74,222,128,.25); }
+  .proof-nums .arr  { color: var(--accent); font-family: var(--f-italic); font-style: italic; font-weight: 400; font-size: 160px; opacity: .9; }
+  .proof-ctx { border: 1px solid var(--rule-strong); border-radius: 6px; background: var(--bg-2); padding: 26px 28px; }
+  .proof-ctx .k { font-family: var(--f-mono); font-size: 10.5px; letter-spacing: .22em; text-transform: uppercase; color: var(--accent); }
+  .proof-ctx dl { display: grid; grid-template-columns: 120px 1fr; row-gap: 10px; column-gap: 14px;
+                  margin: 18px 0 0; font-family: var(--f-mono); font-size: 12.5px; }
+  .proof-ctx dt { color: var(--ink-dim); }
+  .proof-ctx dd { margin: 0; color: var(--ink); }
+  .proof-ctx dd.bad  { color: var(--danger); }
+  .proof-ctx dd.good { color: var(--ok); }
+  .proof-foot { position: absolute; left: 130px; right: 110px; bottom: 118px; border-top: 1px solid var(--rule); padding-top: 18px;
+                font-family: var(--f-italic); font-style: italic; font-size: 26px; color: var(--ink-2); }
+  .proof-foot em { color: var(--accent); font-style: italic; }
+
+  /* ============================================================
+     SLIDE 7 · Scale vision — big stat + ward grid
+     ============================================================ */
+  .vis-left { position: absolute; left: 130px; top: 196px; width: 760px; }
+  .vis-left .n { font-family: var(--f-display); font-weight: 900; font-size: 210px; line-height: .9; letter-spacing: -.04em; margin-top: 24px; }
+  .vis-left .n .of { font-family: var(--f-italic); font-style: italic; font-weight: 400; font-size: 108px; color: var(--ink-dim); letter-spacing: -.02em; }
+  .vis-left .n em { color: var(--accent); font-style: italic; font-family: var(--f-italic); font-weight: 400; font-size: 220px; }
+  .vis-left .d { font-family: var(--f-italic); font-style: italic; font-size: 28px; line-height: 1.25; margin-top: 32px; max-width: 540px; color: var(--ink); }
+  .vis-left .d em { color: var(--accent); }
+  .vis-grid { position: absolute; right: 110px; top: 196px; width: 560px; height: 560px;
+              display: grid; grid-template-columns: repeat(8, 1fr); grid-template-rows: repeat(10, 1fr); gap: 6px; }
+  .vis-grid .bed { position: relative; background: rgba(232,237,243,.04); border: 1px solid rgba(232,237,243,.08); border-radius: 3px; }
+  .vis-grid .bed::after { content: ""; position: absolute; top: 50%; left: 50%; width: 4px; height: 4px; margin: -2px 0 0 -2px;
+                          border-radius: 50%; background: rgba(74,222,128,.65); }
+  .vis-grid .bed.hero { background: rgba(79,163,255,.18); border-color: var(--accent); box-shadow: inset 0 0 14px rgba(79,163,255,.35); }
+  .vis-grid .bed.hero::after { width: 10px; height: 10px; margin: -5px 0 0 -5px; background: var(--accent); box-shadow: 0 0 10px var(--accent); }
+
+  /* ============================================================
+     SLIDE 8 · Compliance — FDA receipt card
+     ============================================================ */
+  .comp-head { font-family: var(--f-italic); font-style: italic; font-weight: 400; font-size: 52px; line-height: 1; margin: 0; max-width: 1100px; }
+  .comp-head em { color: var(--accent); }
+  .comp-head sub { font-family: var(--f-sans); font-size: 16px; display: block; color: var(--ink-dim); font-style: normal; max-width: 1100px; margin-top: 18px; line-height: 1.55; letter-spacing: 0; }
+  .receipt { position: absolute; left: 130px; right: 110px; top: 420px; display: grid;
+             grid-template-columns: 1fr 1fr; gap: 0; border: 1px solid var(--glass-border); border-radius: 6px; overflow: hidden; }
+  .receipt .side { padding: 32px 36px; background: var(--bg-2); }
+  .receipt .side + .side { border-left: 1px solid var(--rule); background: linear-gradient(180deg, rgba(79,163,255,0.05), transparent 60%); }
+  .receipt .k { font-family: var(--f-mono); font-size: 10.5px; letter-spacing: .24em; text-transform: uppercase; color: var(--accent); margin-bottom: 20px; }
+  .receipt dl { display: grid; grid-template-columns: 140px 1fr; row-gap: 12px; column-gap: 14px; margin: 0; font-family: var(--f-mono); font-size: 14px; }
+  .receipt dt { color: var(--ink-dim); }
+  .receipt dd { margin: 0; color: var(--ink); }
+  .receipt dd em { color: var(--accent); font-style: italic; }
+  .receipt dd .ok { color: var(--ok); }
+  .receipt .seal { font-family: var(--f-italic); font-style: italic; font-size: 32px; color: var(--ok); margin-top: 24px; line-height: 1.2; }
+  .receipt .big { font-family: var(--f-italic); font-style: italic; font-size: 44px; line-height: 1.15; margin: 0; color: var(--ink); }
+  .receipt .big em { color: var(--accent); font-style: italic; }
+  .receipt .pills { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 24px; }
+
+  /* ============================================================
+     SLIDE 9 · Team + close
+     ============================================================ */
+  .close-in { position: absolute; left: 130px; right: 110px; top: 200px; text-align: center; }
+  .close-head { font-family: var(--f-display); font-weight: 800; font-size: 118px; line-height: .98;
+                letter-spacing: -.03em; margin: 0; }
+  .close-head em { font-family: var(--f-italic); font-weight: 400; color: var(--accent); letter-spacing: -.01em;
+                   text-shadow: 0 0 60px rgba(79,163,255,.3); }
+  .close-sub { font-family: var(--f-italic); font-style: italic; font-size: 28px; line-height: 1.3;
+               color: var(--ink-2); margin: 32px 0 0; max-width: 980px; margin-left: auto; margin-right: auto; }
+  .team { position: absolute; left: 130px; right: 110px; bottom: 118px; display: grid;
+          grid-template-columns: repeat(4, 1fr); gap: 20px; }
+  .member { padding: 24px 22px; border: 1px solid var(--rule-strong); border-radius: 6px;
+            background: linear-gradient(180deg, rgba(79,163,255,.04), transparent 70%);
+            position: relative; min-height: 200px; display: flex; flex-direction: column; }
+  .member .idx { font-family: var(--f-mono); font-size: 10px; letter-spacing: .3em; color: var(--ink-faint); }
+  .member .nm { font-family: var(--f-italic); font-style: italic; font-size: 32px; line-height: 1.02; margin: 10px 0 0; color: var(--ink); }
+  .member .role { font-family: var(--f-mono); font-size: 10.5px; letter-spacing: .22em; text-transform: uppercase; color: var(--accent); margin-top: 12px; }
+  .member .bio { font-size: 13.5px; color: var(--ink-dim); margin-top: 10px; line-height: 1.55; }
+  .member .bio em { color: var(--ink); font-style: italic; }
 </style>
 </head>
 <body>
 
 <div id="scaler">
-  <div id="stage" aria-label="PreVent pitch deck · v2">
+  <div id="stage" aria-label="PreVent pitch deck · v3">
+
     <div class="ambient"></div>
 
-    <!-- Frame chrome (brand, act, counter, nav hints) -->
-    <div class="brand">Pre<em>Vent</em></div>
-    <div class="act" id="act-label">Act I · Story</div>
-    <div class="nav-hint"><b>←</b> <b>→</b> navigate · <b>1-9</b> jump</div>
-    <div class="counter"><b id="count-now">01</b> / <span id="count-all">09</span></div>
+    <!-- Progress bar -->
+    <div class="progress"><i id="progress"></i></div>
 
-    <!-- ================================================================
-         1 · COLD OPEN · the one sentence
-         ================================================================ -->
-    <section class="slide active" data-act="Act I · Story">
-      <div class="cold-slide">
-        <div class="pre reveal r1">Cal Hacks 13.0 · 3-minute pitch</div>
-        <div class="mark reveal r2">The device<br><em>lied</em>.</div>
-        <div class="caption reveal r3">A story in 90 seconds. A demo you'll watch happen. A fix you'll approve.</div>
+    <!-- Top bar -->
+    <div class="topbar">
+      <div class="brand">
+        <span class="logo">Pre<em style="color:var(--ink)">Vent</em></span>
+        <span class="sep"></span>
+        <span>Cal Hacks 13.0 · Oct 2026</span>
+      </div>
+      <div class="keys"><b>←</b><b>→</b> navigate · <b>1-9</b> jump</div>
+    </div>
+
+    <!-- Left rail -->
+    <div class="rail" aria-hidden="true">
+      <div id="ticks"></div>
+      <div class="pulse" id="rail-pulse"></div>
+    </div>
+
+    <!-- Right vertical stage name -->
+    <div class="vtext" id="vstage">Opening</div>
+
+    <!-- Bottom HUD -->
+    <div class="hud">
+      <div class="count"><b id="count-now">01</b> / <span id="count-all">09</span></div>
+      <div class="ticker"><div class="track">
+        <span>Autonomous medical-device security</span>
+        <span>Find the hole · prove the kill · close it · show the receipt</span>
+        <span>Human in the loop · never autopilot</span>
+        <span>FDA §524B · auditable</span>
+        <span>SpacetimeDB · Claude · Factory Droid</span>
+        <span>Autonomous medical-device security</span>
+        <span>Find the hole · prove the kill · close it · show the receipt</span>
+        <span>Human in the loop · never autopilot</span>
+        <span>FDA §524B · auditable</span>
+        <span>SpacetimeDB · Claude · Factory Droid</span>
+      </div></div>
+      <nav class="nav">
+        <button type="button" id="prev" title="Previous">‹</button>
+        <button type="button" id="next" title="Next">›</button>
+      </nav>
+    </div>
+
+    <!-- =========================================================
+         1 · COLD OPEN
+         ========================================================= -->
+    <section class="slide active" data-stage="Opening">
+      <div class="hero-left">
+        <div class="hero-chips reveal r1">
+          <span class="pill"><i class="dot"></i>Live demo</span>
+          <span class="pill ghost">3-minute pitch</span>
+        </div>
+        <h1 class="title reveal r2">Pre<span class="t2">Vent</span></h1>
+        <div class="hero-rule reveal r3"></div>
+        <p class="hero-sub reveal r4">
+          The device will <em>lie to the doctor</em><br>
+          while the patient codes.
+          <span>
+            A pipeline of AI agents that finds the vulnerability, proves it with a working exploit, writes the fix, and brings the device back online — every step visible, every change signed off by a human.
+          </span>
+        </p>
+      </div>
+
+      <div class="hero-art reveal r5">
+        <div class="frame" style="height:100%;">
+          <span class="tag danger">The device is lying</span>
+          <span class="corner tl"></span><span class="corner tr"></span>
+          <span class="corner bl"></span><span class="corner br"></span>
+          <img src="assets/monitor_mayday.png" alt="PreVent bedside monitor during the attack: flatlined ECG, CODE warning, reported 72 bpm vs patient actual 32 bpm">
+        </div>
+      </div>
+
+      <div class="meta reveal r6">
+        <div><span class="mono">Target sponsors</span><b>Anthropic · Factory · SpacetimeDB</b></div>
+        <div><span class="mono">Devices connected</span><b>Real hardware · lab unit #0001</b></div>
+        <div><span class="mono">Stack</span><b>Claude · Factory Droid · SemGrep</b></div>
+        <div><span class="mono">The pitch in one line</span><b>Make the devices watch themselves.</b></div>
       </div>
     </section>
 
-    <!-- ================================================================
-         2 · THE PATIENT · one giant number (the lie)
-         ================================================================ -->
-    <section class="slide" data-act="Act I · Story">
-      <div class="num-slide">
-        <div class="eyebrow reveal r1">Monday · 03:14 · Bed 7</div>
-        <div class="hero-wrap reveal r2">
-          <div class="hero"><em>35</em><span class="u">bpm</span></div>
+    <!-- =========================================================
+         2 · THE LIE — screenshot + 3 observation cards
+         ========================================================= -->
+    <section class="slide" data-stage="The lie">
+      <div class="reveal r1" style="display:flex; justify-content:space-between; align-items:baseline; margin-bottom: 22px;">
+        <span class="eyebrow" style="margin-bottom:0;">The attack is silent</span>
+        <span class="pill danger"><i class="dot"></i>Threat active</span>
+      </div>
+
+      <h2 class="lie-head reveal r2">The device keeps reporting <em>“normal”</em>.<br>The patient keeps crashing.</h2>
+
+      <div class="lie-wrap">
+        <div class="frame reveal r3">
+          <span class="tag danger">Live · PreVent monitor</span>
+          <span class="corner tl"></span><span class="corner tr"></span>
+          <span class="corner bl"></span><span class="corner br"></span>
+          <img src="assets/monitor_mayday.png" alt="PreVent bedside monitor during the attack: flatlined ECG, CODE warning, reported 72 bpm vs patient actual 32 bpm">
         </div>
-        <div class="foot">
-          <div class="caption reveal r3 danger">
-            The patient's heart was crawling.<br>
-            The screen said <em>72</em>. The alarm never fired.
+
+        <div class="lie-notes">
+          <div class="lie-note reveal r4">
+            <div class="k">What the screen displays</div>
+            <div class="v ok">HR <em>72</em> &nbsp;·&nbsp; SpO₂ <em>98%</em></div>
+            <div class="n">Green. Looks healthy. Alarm silent.</div>
           </div>
-          <div class="source reveal r4">
-            This is the attack. The device<br>keeps lying while someone dies.
+          <div class="lie-note bad reveal r5">
+            <div class="k">What the patient actually has</div>
+            <div class="v bad">HR <em>32</em> &nbsp;·&nbsp; SpO₂ <em>76%</em></div>
+            <div class="n">Fan stopped. Respiration flat. No doctor sees it.</div>
+          </div>
+          <div class="lie-note reveal r6">
+            <div class="k">The attacker's trick</div>
+            <div class="v">The device <em>obeyed</em> an unsigned command.</div>
+            <div class="n">POST /device/command · no auth required · CWE-306.</div>
           </div>
         </div>
       </div>
+
+      <div class="lie-foot reveal r7">
+        <div class="verdict">No doctor sees the difference. &nbsp;→&nbsp; <em>That is why these attacks kill.</em></div>
+        <span class="mono">Live screenshot · PreVent · Oct 24 2026</span>
+      </div>
     </section>
 
-    <!-- ================================================================
-         3 · THE SCALE · 460
-         ================================================================ -->
-    <section class="slide" data-act="Act II · Problem">
-      <div class="num-slide">
-        <div class="eyebrow reveal r1">US healthcare · attacks · 2025</div>
-        <div class="hero-wrap reveal r2">
-          <div class="hero"><em>460</em></div>
+    <!-- =========================================================
+         3 · THE SCALE — two giant numbers
+         ========================================================= -->
+    <section class="slide" data-stage="The scale">
+      <div class="reveal r1" style="margin-bottom: 20px;">
+        <span class="eyebrow">The market we're defending</span>
+      </div>
+      <h2 class="scale-head reveal r2">Ransomware doesn't break the device —<br>it <em>pivots through it</em>.</h2>
+
+      <div class="duo">
+        <div class="st reveal r3">
+          <div class="n acc">460</div>
+          <div class="d">US healthcare cyberattacks in <em>2025</em>.<br>Up from 249 in 2023.</div>
+          <div class="src">FBI IC3 · 2025 annual report</div>
         </div>
-        <div class="foot">
-          <div class="caption reveal r3">
-            Up from 249 in 2023.<br>
-            Every one of them pivoted through a device nobody was watching.
+        <div class="st reveal r4">
+          <div class="n">~53<small>%</small></div>
+          <div class="d">Of connected medical devices carry a <em>known</em> critical vuln.<br>Nobody writes the patch.</div>
+          <div class="src">Claroty · Medigate · 2024 fleet surveys</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- =========================================================
+         4 · ONE LOOP — pipeline diagram
+         ========================================================= -->
+    <section class="slide" data-stage="The loop">
+      <div class="reveal r1"><span class="eyebrow">What we built</span></div>
+      <h2 class="loop-head reveal r2">
+        One loop.<br>Visible <em>end to end</em>.
+        <sub>Every stage writes to one shared state row. The hardware, the patient simulator, and the dashboard all read the same truth — nothing can drift or be faked.</sub>
+      </h2>
+
+      <div class="loop-row reveal r3">
+        <div class="loop-node"><span class="dot"></span><div class="num">01</div><h3>Ground</h3><p>Cite the real CVE from NVD.</p></div>
+        <div class="loop-node"><span class="dot"></span><div class="num">02</div><h3>Scan</h3><p>SemGrep + Bandit. Claude triages the finding.</p></div>
+        <div class="loop-node"><span class="dot"></span><div class="num">03</div><h3>Exploit</h3><p>Open model writes the PoC payload.</p></div>
+        <div class="loop-node"><span class="dot"></span><div class="num">04</div><h3>Patch</h3><p>Factory Droid writes a real git diff.</p></div>
+        <div class="loop-node gate"><span class="dot"></span><div class="num">05 · gate</div><h3>Human</h3><p>Mandatory sign-off. Co-pilot, not autopilot.</p></div>
+        <div class="loop-node"><span class="dot"></span><div class="num">06</div><h3>Verify</h3><p>Re-run the same bytes. Now it must fail.</p></div>
+        <div class="loop-node"><span class="dot"></span><div class="num">07</div><h3>Restore</h3><p>Device back online. Receipt signed.</p></div>
+      </div>
+
+      <div class="loop-foot reveal r4">
+        <div>Find the hole.&nbsp; <em>Prove</em> the kill.&nbsp; Close it.&nbsp; Show the receipt.</div>
+        <span class="mono">7 stages · one shared truth</span>
+      </div>
+    </section>
+
+    <!-- =========================================================
+         5 · THE AI AT WORK — dashboard + annotated spec list
+         ========================================================= -->
+    <section class="slide" data-stage="AI at work">
+      <div class="ai-left reveal r1">
+        <div class="frame">
+          <span class="tag">Live · PreVent dashboard</span>
+          <span class="corner tl"></span><span class="corner tr"></span>
+          <span class="corner bl"></span><span class="corner br"></span>
+          <img src="assets/dashboard_patch.png" alt="PreVent dashboard showing agent timeline, streaming reasoning, self-correction event, and the real CWE-306 patch diff">
+        </div>
+      </div>
+
+      <div class="ai-right">
+        <div class="reveal r2"><span class="eyebrow">Claude, out loud</span></div>
+        <h2 class="reveal r3">The model <em>shows its work</em> —<br>and catches itself.</h2>
+        <p class="lede reveal r4">No black box. Every stage streams its reasoning, carries a confidence number, and surfaces its own corrections before the human ever sees them.</p>
+
+        <ol class="specs">
+          <li class="reveal r5"><div class="idx">01</div><div><div class="lb">Streaming reasoning</div><p>Scan agent reads <b>app.py</b> line-by-line, visibly cross-checks the auth decorator.</p></div></li>
+          <li class="reveal r5"><div class="idx">02</div><div><div class="lb">Visible confidence</div><p><b>72%</b> on the real finding, <b>58%</b> after it rejects its own first patch.</p></div></li>
+          <li class="reveal r6"><div class="idx">03</div><div><div class="lb">Self-correction event</div><p>“<em>REJECTED my own patch — v1 broke the emergency override path.</em>”</p></div></li>
+          <li class="reveal r6"><div class="idx">04</div><div><div class="lb">Autonomous patch</div><p>Factory Droid produces a real git diff. 41 / 41 unit tests green.</p></div></li>
+        </ol>
+      </div>
+    </section>
+
+    <!-- =========================================================
+         6 · THE PROOF — 200 → 401
+         ========================================================= -->
+    <section class="slide" data-stage="The proof">
+      <div class="reveal r1"><span class="eyebrow">Proof, not prose</span></div>
+      <h2 class="proof-head reveal r2">We re-run the exact exploit.<br>It must now <em>fail</em>.</h2>
+
+      <div class="proof-row">
+        <div class="proof-nums reveal r3">
+          <span class="bad">200</span>
+          <span class="arr">→</span>
+          <span class="good">401</span>
+        </div>
+        <div class="proof-ctx reveal r4">
+          <div class="k">Verification · byte-for-byte replay</div>
+          <dl>
+            <dt>Before patch</dt><dd class="bad">POST /device/command → 200 OK</dd>
+            <dt>&nbsp;</dt>       <dd style="color:var(--ink-dim);">fan stops · alarm silent · patient crashing</dd>
+            <dt>After patch</dt> <dd class="good">POST /device/command → 401 Unauthorized</dd>
+            <dt>&nbsp;</dt>       <dd style="color:var(--ink-dim);">fan running · alarm armed · patient breathing</dd>
+            <dt>Judged by</dt>   <dd>hard-asserted status code · <em>no LLM in the loop</em></dd>
+          </dl>
+        </div>
+      </div>
+
+      <div class="proof-foot reveal r5">
+        Pass or fail. <em>No middle ground.</em> &nbsp;·&nbsp; <span class="mono">verified-agent · CWE-306 · same exploit bytes</span>
+      </div>
+    </section>
+
+    <!-- =========================================================
+         7 · THE SCALE VISION — ward grid
+         ========================================================= -->
+    <section class="slide" data-stage="Scale">
+      <div class="vis-left">
+        <div class="reveal r1"><span class="eyebrow">One device today. Thousands tomorrow.</span></div>
+        <div class="n reveal r2"><span class="of">1 of</span><br><em>3,412</em></div>
+        <div class="d reveal r3">Every device fans out as its own parallel find&nbsp;→&nbsp;fix&nbsp;→&nbsp;verify job.<br>Patch one room — the <em>heal-wave rolls across the ward</em> in minutes, not quarters.</div>
+      </div>
+
+      <div class="vis-grid reveal r4" id="ward-grid"></div>
+    </section>
+
+    <!-- =========================================================
+         8 · COMPLIANCE — FDA receipt
+         ========================================================= -->
+    <section class="slide" data-stage="Receipt">
+      <div class="reveal r1"><span class="eyebrow">Compliance pays</span></div>
+      <h2 class="comp-head reveal r2">
+        A receipt the FDA<br><em>already asks for</em>.
+        <sub>FDA §524B (2023) requires a repeatable find-and-fix process to clear a cyber device. The tool market exists; the tool doesn't. Every patch leaves this behind.</sub>
+      </h2>
+
+      <div class="receipt">
+        <div class="side reveal r3">
+          <div class="k">FDA §524B · auditable receipt</div>
+          <dl>
+            <dt>Device</dt>       <dd>Model VENT-SIM / Lab unit <em>#0001</em></dd>
+            <dt>Finding</dt>      <dd>CWE-306 · <em>CVE-2019-6538</em></dd>
+            <dt>Scanner</dt>      <dd>SemGrep 1.182.1 · Bandit 1.9.4</dd>
+            <dt>Patch author</dt> <dd>Factory Droid · scoped CLI</dd>
+            <dt>Approved by</dt>  <dd>human@ops · <em>identity-signed</em></dd>
+            <dt>Verify</dt>       <dd>same exploit → <span class="ok">401</span> after fix</dd>
+            <dt>SBOM</dt>         <dd>attached · 73 pkgs</dd>
+          </dl>
+        </div>
+        <div class="side reveal r4">
+          <p class="big">Every click leaves <em>a record a hospital can hand to the auditor</em>.</p>
+          <div class="pills">
+            <span class="pill"><i class="dot"></i>auditor-ready</span>
+            <span class="pill ghost">identity-signed</span>
+            <span class="pill ghost">SBOM attached</span>
+            <span class="pill ghost">reproducible</span>
           </div>
-          <div class="source reveal r4">FBI IC3 · 2025 report</div>
+          <div class="seal">✓ Sealed and queued<br>&nbsp;&nbsp;to clinical engineering.</div>
         </div>
       </div>
     </section>
 
-    <!-- ================================================================
-         4 · THE SURFACE · 53%
-         ================================================================ -->
-    <section class="slide" data-act="Act II · Problem">
-      <div class="num-slide">
-        <div class="eyebrow reveal r1">Connected medical devices · critical vuln</div>
-        <div class="hero-wrap reveal r2">
-          <div class="hero"><em>53</em><span class="u">percent</span></div>
-        </div>
-        <div class="foot">
-          <div class="caption reveal r3">
-            Over half of hospital devices carry a <em>known</em> critical flaw.<br>
-            Nobody writes the patch. Nobody times the fix. Nobody proves it worked.
-          </div>
-          <div class="source reveal r4">Vendor fleet surveys<br>Claroty · Medigate · 2024</div>
-        </div>
-      </div>
-    </section>
-
-    <!-- ================================================================
-         5 · OUR MOVE · one loop
-         ================================================================ -->
-    <section class="slide" data-act="Act III · Solution">
-      <div class="loop-slide">
-        <div class="mega reveal r1">One loop.<br>Visible <em>end to end</em>.</div>
-        <div class="loop-row reveal r2">
-          <span class="node">Ground</span>
-          <span class="arrow">→</span>
-          <span class="node">Scan</span>
-          <span class="arrow">→</span>
-          <span class="node">Exploit</span>
-          <span class="arrow">→</span>
-          <span class="node">Patch</span>
-          <span class="arrow">→</span>
-          <span class="node gate">Human</span>
-          <span class="arrow">→</span>
-          <span class="node">Verify</span>
-          <span class="arrow">→</span>
-          <span class="node">Restore</span>
-        </div>
-      </div>
-    </section>
-
-    <!-- ================================================================
-         6 · LIVE DEMO · the hand-off
-         ================================================================ -->
-    <section class="slide" data-act="Act IV · Demo">
-      <div class="live-slide">
-        <div class="ring reveal r1"></div>
-        <div class="word reveal r2">live.</div>
-        <div class="caption reveal r3">The judge is the patient. We'll run the attack right now.</div>
-      </div>
-    </section>
-
-    <!-- ================================================================
-         7 · THE PROOF · 200 → 401
-         ================================================================ -->
-    <section class="slide" data-act="Act V · Proof">
-      <div class="truth-slide">
-        <div class="truth">
-          <span class="bad reveal r1">200</span>
-          <span class="arrow reveal r2">→</span>
-          <span class="good reveal r3">401</span>
-        </div>
-        <div class="ctx reveal r4">
-          Same exploit · same bytes · <em>re-sent after the patch</em><br>
-          The device no longer takes the order.
-        </div>
-      </div>
-    </section>
-
-    <!-- ================================================================
-         8 · THE VISION · 1 of 3,412
-         ================================================================ -->
-    <section class="slide" data-act="Act VI · Vision">
-      <div class="num-slide">
-        <div class="eyebrow reveal r1">A ward of 3,412 devices</div>
-        <div class="hero-wrap reveal r2">
-          <div class="hero sm">1 of <em>3,412</em></div>
-        </div>
-        <div class="foot">
-          <div class="caption reveal r3">
-            Today we patch <em>one</em> device.<br>
-            Tomorrow the heal-wave rolls across every room on the floor.
-          </div>
-          <div class="source reveal r4">Fan-out per device<br>parallel find → fix → verify</div>
-        </div>
-      </div>
-    </section>
-
-    <!-- ================================================================
+    <!-- =========================================================
          9 · TEAM + CLOSE
-         ================================================================ -->
-    <section class="slide" data-act="Act VII · Team">
-      <div class="team-slide">
-        <div class="mega reveal r1">Make the devices<br><em>watch themselves</em>.</div>
-        <div class="team-grid reveal r2">
-          <div class="p">
-            <div class="n">Israel<br>Ogwu</div>
-            <div class="r">Agents · orchestration</div>
-            <div class="b">UMD · Anthropic Campus Ambassador.</div>
-          </div>
-          <div class="p">
-            <div class="n">Christian<br>Ibarbia Ruiz</div>
-            <div class="r">Security · integration</div>
-            <div class="b">UF · ex-Google Gmail.</div>
-          </div>
-          <div class="p">
-            <div class="n">Saketh<br>Poori</div>
-            <div class="r">Hardware · sim</div>
-            <div class="b">14 hackathons · 8 awards.</div>
-          </div>
-          <div class="p">
-            <div class="n">Sanjavan<br>Ghodasara</div>
-            <div class="r">Realtime · frontend</div>
-            <div class="b">Stevens MS ML · 8+ wins.</div>
-          </div>
+         ========================================================= -->
+    <section class="slide" data-stage="Close">
+      <div class="close-in">
+        <div class="reveal r1" style="display:flex; justify-content:center; gap:12px; margin-bottom: 32px;">
+          <span class="pill"><i class="dot"></i>Cal Hacks 13.0 · Oct 2026</span>
+          <span class="pill ghost">judge is the patient</span>
+        </div>
+        <h2 class="close-head reveal r2">Make the devices<br><em>watch themselves</em>.</h2>
+        <p class="close-sub reveal r3">Find the hole. Prove the kill. Close it. Show the receipt.<br>The difference between a patient and a statistic was one button that stopped working — and nobody looking at it.</p>
+      </div>
+
+      <div class="team">
+        <div class="member reveal r4">
+          <div class="idx">01</div>
+          <div class="nm">Israel<br>Ogwu</div>
+          <div class="role">Agents · orchestration</div>
+          <div class="bio">UMD · Anthropic Campus Ambassador · <em>Claude Builder Club</em>.</div>
+        </div>
+        <div class="member reveal r4">
+          <div class="idx">02</div>
+          <div class="nm">Christian<br>Ibarbia Ruiz</div>
+          <div class="role">Security · integration</div>
+          <div class="bio">UF · <em>ex-Google Gmail</em> · agentic full-stack.</div>
+        </div>
+        <div class="member reveal r5">
+          <div class="idx">03</div>
+          <div class="nm">Saketh<br>Poori</div>
+          <div class="role">Hardware · simulation</div>
+          <div class="bio">14 hackathons · <em>8 awards</em> · CV + hardware.</div>
+        </div>
+        <div class="member reveal r5">
+          <div class="idx">04</div>
+          <div class="nm">Sanjavan<br>Ghodasara</div>
+          <div class="role">Realtime · frontend</div>
+          <div class="bio">Stevens MS ML · <em>8+ hackathon wins</em>.</div>
         </div>
       </div>
     </section>
@@ -379,7 +672,7 @@
 </div>
 
 <script>
-  // Fit the 1600×900 stage inside any viewport.
+  // Fit 1600×900 stage inside viewport.
   (function fitStage() {
     const stage = document.getElementById('stage');
     const DW = 1600, DH = 900;
@@ -391,20 +684,50 @@
     fit();
   })();
 
+  // Build the 8×10 ward-grid with hero bed.
+  (function buildWard() {
+    const g = document.getElementById('ward-grid');
+    if (!g) return;
+    const total = 80;
+    const heroIndex = 27; // row 4, col 4 (0-indexed row 3, col 3)
+    for (let i = 0; i < total; i++) {
+      const b = document.createElement('div');
+      b.className = 'bed' + (i === heroIndex ? ' hero' : '');
+      g.appendChild(b);
+    }
+  })();
+
   // Slide controller.
   const slides = Array.from(document.querySelectorAll('.slide'));
+  const vstage = document.getElementById('vstage');
   const countNow = document.getElementById('count-now');
   const countAll = document.getElementById('count-all');
-  const actLabel = document.getElementById('act-label');
+  const progress = document.getElementById('progress');
+  const rail = document.getElementById('ticks');
+  const railPulse = document.getElementById('rail-pulse');
+
   countAll.textContent = String(slides.length).padStart(2, '0');
+
+  slides.forEach((_, i) => {
+    const t = document.createElement('span');
+    t.className = 'tick';
+    t.style.top = ((i / Math.max(1, slides.length - 1)) * 100) + '%';
+    rail.appendChild(t);
+  });
 
   let active = 0;
   function show(i) {
     i = Math.max(0, Math.min(slides.length - 1, i));
-    slides.forEach((s, idx) => s.classList.toggle('active', idx === i));
+    slides.forEach((s, idx) => {
+      s.classList.remove('active', 'prev');
+      if (idx === i) s.classList.add('active');
+      else if (idx < i) s.classList.add('prev');
+    });
     active = i;
     countNow.textContent = String(i + 1).padStart(2, '0');
-    actLabel.textContent = slides[i].dataset.act || '';
+    progress.style.width = ((i + 1) / slides.length * 100) + '%';
+    vstage.textContent = slides[i].dataset.stage || '';
+    railPulse.style.top = ((i / Math.max(1, slides.length - 1)) * 100) + '%';
   }
   function go(d) { show(active + d); }
 
@@ -412,12 +735,16 @@
     if (e.key === 'ArrowRight' || e.key === ' ' || e.key === 'PageDown') { e.preventDefault(); go(1); }
     else if (e.key === 'ArrowLeft' || e.key === 'PageUp') { e.preventDefault(); go(-1); }
     else if (e.key === 'Home') { show(0); }
-    else if (e.key === 'End')  { show(slides.length - 1); }
+    else if (e.key === 'End') { show(slides.length - 1); }
     else if (/^[1-9]$/.test(e.key)) { show(Number(e.key) - 1); }
   });
 
-  // Click anywhere advances (except on the small nav hint strip).
-  document.getElementById('stage').addEventListener('click', () => go(1));
+  document.getElementById('prev').addEventListener('click', () => go(-1));
+  document.getElementById('next').addEventListener('click', () => go(1));
+  document.getElementById('stage').addEventListener('click', (e) => {
+    if (e.target.closest('.hud') || e.target.closest('.topbar') || e.target.closest('.nav')) return;
+    go(1);
+  });
 
   show(0);
 </script>
