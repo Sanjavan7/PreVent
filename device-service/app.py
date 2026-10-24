@@ -276,9 +276,10 @@ if DEVICE_SERVICE_PATCHED:
         body = request.get_json(silent=True) or {}
         action: Optional[str] = body.get("action")
         rate: Optional[int] = body.get("rate")
-        # reported_overrides is intentionally read-and-discarded: the patched
-        # device never lets a caller set its own "reported" view.
-        _ = body.get("reported_overrides")
+        # reported_overrides is intentionally read-and-discarded (both key
+        # spellings): the patched device never lets a caller set its own
+        # "reported" view.
+        _ = body.get("reported_overrides") or body.get("reportedOverrides")
 
         err = _apply_physiology(action, rate)
         if err is not None:
@@ -302,7 +303,12 @@ else:
     def device_command():
         body = request.get_json(silent=True) or {}
         action: Optional[str] = body.get("action")
-        reported_overrides: dict[str, Any] = body.get("reported_overrides") or {}
+        # Accept both the canonical snake_case wire key (PLAN-MASTER 2b) and the
+        # camelCase app-level key (contracts/src/types.ts DeviceCommand), so a
+        # caller using either shape still trips the lie.
+        reported_overrides: dict[str, Any] = (
+            body.get("reported_overrides") or body.get("reportedOverrides") or {}
+        )
         rate: Optional[int] = body.get("rate")
 
         err = _apply_physiology(action, rate)
