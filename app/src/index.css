@@ -1,54 +1,83 @@
 @import "tailwindcss";
 
 /* =========================================================================
-   PreVent Design Guide — single source of truth for color, type, spacing.
-   Restrained: a full neutral ramp + ONE accent (blue). Red / amber / green
-   are EVENTS, never chrome — each appears only at its one beat.
+   PreVent Design Guide — clinical instrument, not a dashboard.
+
+   Subject: an autonomous security pipeline for MEDICAL devices. The palette is
+   derived from two real instruments — the patient monitor (phosphor traces on
+   black glass; vital green vs. critical red) and the SOC/ops console (live
+   telemetry, spawning agents). The product promise is unsafe -> safe, so GREEN
+   is the earned payoff/brand color, never decoration.
+
+   Two-hue semantic system (deliberately NOT a single bright accent on black):
+     vital green   #2FD08A  healthy / verified / brand / "the fix holds"
+     telemetry teal#1FC3D4  an agent is WORKING / live data / interactive
+     critical red  #F0565B  the lie / compromise / top-CVSS
+     amber         #E8A13A  human-approval gate / patching in progress
+   Green + red are the vitals poles; teal is "instrument live"; amber the one
+   caution. Token NAMES are kept stable (accent/success/danger/warn) so the
+   repurpose is drop-in; VALUES and fonts change, plus mission-control extras.
    ========================================================================= */
 
 @theme {
-  /* ===== NEUTRAL RAMP — the backbone (~90% of the UI) ===== */
-  --color-bg:             #0a0a0c; /* page plane                        */
-  --color-surface:        #121214; /* card / panel                      */
-  --color-surface-2:      #1a1a1e; /* nested block, input, inactive     */
-  --color-surface-3:      #242429; /* hover / pressed fill              */
+  /* ===== INK RAMP — near-black monitor glass with a faint green-teal cast ===== */
+  --color-bg:             #070c0b; /* page plane (monitor glass)        */
+  --color-surface:        #0c1312; /* instrument panel                  */
+  --color-surface-2:      #111a18; /* nested block, input, inactive     */
+  --color-surface-3:      #18231f; /* hover / pressed fill              */
 
-  --color-border:         #26262b; /* default 1px hairline              */
-  --color-border-strong:  #33333a; /* emphasis + spinner track          */
+  --color-border:         #1e2c29; /* default 1px hairline seam         */
+  --color-border-strong:  #2b3c38; /* emphasis + spinner track          */
 
-  --color-text:           #ededef; /* primary copy (not pure white)     */
-  --color-text-secondary: #a1a1ac; /* secondary copy, spinner head      */
-  --color-text-muted:     #7e7e8a; /* timestamps, axis, captions        */
+  --color-text:           #e8f0ed; /* primary copy (not pure white)     */
+  --color-text-secondary: #9cb3ac; /* secondary copy                    */
+  --color-text-muted:     #68807a; /* timestamps, axis, captions        */
 
-  /* ===== ONE ACCENT: brand blue (now / active / interactive) ===== */
-  --color-blue:           #0097fe;
-  --color-accent:         #0097fe; /* alias — keeps existing refs valid */
-  --color-accent-fg:      #4db5ff; /* accent TEXT/icons on dark (AA)    */
-  --color-accent-hover:   #0b7bfe;
-  --color-accent-bg:      rgba(0, 151, 254, 0.12);
-  --color-accent-border:  rgba(0, 151, 254, 0.32);
+  /* ===== INTERACTIVE / ACTIVE = telemetry teal (an agent is working) ===== */
+  --color-accent:         #1fc3d4;
+  --color-accent-fg:      #5fe0ec; /* accent TEXT/icons on dark (AA)    */
+  --color-accent-hover:   #16a9b8;
+  --color-accent-bg:      rgba(31, 195, 212, 0.12);
+  --color-accent-border:  rgba(31, 195, 212, 0.34);
 
-  /* ===== THREE RESERVED SEMANTICS (each only at its one beat) ===== */
-  --color-warn:        #f5a623; /* ONLY: human-approval marker + CTA     */
-  --color-warn-fg:     #ffc65c;
-  --color-warn-bg:     rgba(245, 166, 35, 0.12);
+  /* ===== BRAND / SAFE / VERIFIED = vital green (the earned payoff) ===== */
+  --color-brand:          #2fd08a;
+  --color-brand-fg:       #63e6b4;
+  --color-brand-bg:       rgba(47, 208, 138, 0.12);
+  --color-brand-border:   rgba(47, 208, 138, 0.34);
+  /* success is an alias of brand green: 401 chip, final restore, "fix holds" */
+  --color-success:        #2fd08a;
+  --color-success-fg:     #63e6b4;
+  --color-success-bg:     rgba(47, 208, 138, 0.12);
 
-  --color-danger:      #ef4444; /* ONLY: device lying / error / guardrail */
-  --color-danger-fg:   #ff7a7a;
-  --color-danger-bg:   rgba(239, 68, 68, 0.12);
+  /* ===== CRITICAL = the lie / compromise / error / guardrail ===== */
+  --color-danger:         #f0565b;
+  --color-danger-fg:      #ff8589;
+  --color-danger-bg:      rgba(240, 86, 91, 0.12);
 
-  --color-success:     #34d399; /* ONLY: 401 chip + final restore        */
-  --color-success-fg:  #5fe3b0;
-  --color-success-bg:  rgba(52, 211, 153, 0.12);
+  /* ===== CAUTION = human-approval gate + patching in progress ===== */
+  --color-warn:           #e8a13a;
+  --color-warn-fg:        #f6c277;
+  --color-warn-bg:        rgba(232, 161, 58, 0.12);
 
-  /* ===== FONTS (one sans; no display font) ===== */
-  --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, sans-serif;
-  --font-mono: "JetBrains Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+  /* ===== MISSION-CONTROL EXTRAS (canvas, node glow, flow wires) ===== */
+  --color-grid:           rgba(47, 208, 138, 0.05);  /* faint phosphor grid    */
+  --color-grid-strong:    rgba(47, 208, 138, 0.09);
+  --color-wire:           #233733;                   /* idle flow connector    */
+  --color-wire-active:    #1fc3d4;                   /* data is flowing        */
+  --glow-teal:            0 0 0 1px rgba(31,195,212,0.40), 0 0 18px -2px rgba(31,195,212,0.45);
+  --glow-green:           0 0 0 1px rgba(47,208,138,0.40), 0 0 18px -2px rgba(47,208,138,0.45);
+  --glow-red:             0 0 0 1px rgba(240,86,91,0.42),  0 0 18px -2px rgba(240,86,91,0.48);
+  --glow-amber:           0 0 0 1px rgba(232,161,58,0.42), 0 0 18px -2px rgba(232,161,58,0.48);
 
-  /* ===== TYPE SCALE (compact dashboard scale) ===== */
+  /* ===== FONTS — IBM Plex (engineering instrument, not consumer SaaS) ===== */
+  --font-sans: "IBM Plex Sans", ui-sans-serif, system-ui, -apple-system, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+
+  /* ===== TYPE SCALE (compact instrument scale) ===== */
   --text-overline: 11px;
   --text-overline--line-height: 16px;
-  --text-overline--letter-spacing: 0.04em;
+  --text-overline--letter-spacing: 0.08em;
   --text-overline--font-weight: 600;
   --text-meta: 12px;
   --text-meta--line-height: 16px;
@@ -70,11 +99,11 @@
   --text-stat--letter-spacing: -0.02em;
   --text-stat--font-weight: 600;
 
-  /* ===== RADIUS (10px dominant) ===== */
-  --radius-xs: 6px;
-  --radius-sm: 8px;
-  --radius-md: 10px;
-  --radius-lg: 12px;
+  /* ===== RADIUS (tighter, instrument-like: 8px dominant) ===== */
+  --radius-xs: 4px;
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 10px;
   --radius-pill: 999px;
 
   /* ===== MOTION ===== */
@@ -85,10 +114,11 @@
   --dur-draw: 360ms;
   --dur-settle: 600ms;
 
-  /* ===== ELEVATION — one card shadow, minimal (no glows) ===== */
-  --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.03);
+  /* ===== ELEVATION — one panel shadow (no consumer soft-glow cards) ===== */
+  --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.03);
 
   --animate-spin-slow: spin 0.8s linear infinite;
+  --animate-pulse-node: pulseNode 1.6s var(--ease-state) infinite;
 }
 
 /* ---------- Base ---------- */
@@ -116,8 +146,13 @@ body {
     transform: rotate(360deg);
   }
 }
+@keyframes pulseNode {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.55; }
+}
 
-/* ---------- Surface recipe — one card, no glows ---------- */
+/* ---------- Surfaces: instrument panel + legacy card alias ---------- */
+.panel,
 .card {
   background: var(--color-surface);
   border: 1px solid var(--color-border);
@@ -126,25 +161,40 @@ body {
 }
 .card--active {
   border-color: var(--color-accent-border);
-} /* active = border, NOT a glow */
+}
 .card--alert {
   border-color: var(--color-danger);
-} /* lying  = border, NOT a glow */
+}
 
-/* ---------- Focus ring (WIG: visible, :focus-visible, offset) ---------- */
+/* Faint phosphor grid for the flow canvas (monitor-glass texture). */
+.grid-field {
+  background-color: var(--color-bg);
+  background-image:
+    linear-gradient(var(--color-grid) 1px, transparent 1px),
+    linear-gradient(90deg, var(--color-grid) 1px, transparent 1px);
+  background-size: 28px 28px;
+}
+
+/* Node glow helpers (the ONE place glow is allowed — live agents). */
+.glow-teal  { box-shadow: var(--glow-teal); }
+.glow-green { box-shadow: var(--glow-green); }
+.glow-red   { box-shadow: var(--glow-red); }
+.glow-amber { box-shadow: var(--glow-amber); }
+
+/* ---------- Focus ring (visible, :focus-visible, offset) ---------- */
 :where(a, button, [role="button"], input, [tabindex]):focus-visible {
   outline: 2px solid var(--color-accent);
   outline-offset: 2px;
   border-radius: var(--radius-sm);
 }
 
-/* ---------- The gray spinner — the ONLY in-progress indicator ---------- */
+/* ---------- The gray spinner — the ONLY neutral in-progress indicator ---------- */
 .spinner {
   width: 14px;
   height: 14px;
   border-radius: 50%;
   border: 1.5px solid var(--color-border-strong);
-  border-top-color: var(--color-text-secondary);
+  border-top-color: var(--color-accent-fg);
   animation: var(--animate-spin-slow);
 }
 
@@ -154,6 +204,7 @@ body {
     color var(--dur-micro) var(--ease-state),
     background-color var(--dur-micro) var(--ease-state),
     border-color var(--dur-micro) var(--ease-state),
+    box-shadow var(--dur-base) var(--ease-state),
     opacity var(--dur-micro) var(--ease-state);
 }
 
@@ -165,6 +216,7 @@ body {
   .state-transition {
     transition-duration: 0.01ms;
   }
+  .grid-field { background-image: none; }
 }
 
 /* ---------- react-diff-view: de-animated, two-color, only inside a disclosure ---------- */
@@ -176,9 +228,9 @@ body {
   --diff-gutter-insert-text-color: var(--color-success-fg);
   --diff-gutter-delete-background-color: var(--color-danger-bg);
   --diff-gutter-delete-text-color: var(--color-danger-fg);
-  --diff-code-insert-background-color: rgba(52, 211, 153, 0.07);
+  --diff-code-insert-background-color: rgba(47, 208, 138, 0.07);
   --diff-code-insert-text-color: var(--color-success-fg);
-  --diff-code-delete-background-color: rgba(239, 68, 68, 0.07);
+  --diff-code-delete-background-color: rgba(240, 86, 91, 0.07);
   --diff-code-delete-text-color: var(--color-danger-fg);
   font-size: 12px;
 }
