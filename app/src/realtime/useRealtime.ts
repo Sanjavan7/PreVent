@@ -9,7 +9,10 @@ import type {
   AgentStatus,
   DeviceStatus,
   EventLogRow,
+  ExploitRun,
   Finding,
+  IrEvent,
+  PatchAttempt,
 } from '@prevent/contracts';
 
 import { useRealtimeLive } from './useRealtimeLive';
@@ -24,9 +27,19 @@ export interface RealtimeState {
   agents: AgentStatus[];
   findings: Finding[];
   eventLog: EventLogRow[];
+  /** Exploit replays either side of the patch (newest first). */
+  exploitRuns: ExploitRun[];
+  /** Patch attempts incl. the inline diff + human-approval state (newest first). */
+  patchAttempts: PatchAttempt[];
+  /** IR remote picks driving the hardware demo rig (newest first). */
+  irEvents: IrEvent[];
   /** Mock-only: flip the device between healthy and exploited fixtures. */
   mockExploited: boolean;
   setMockExploited: (exploited: boolean) => void;
+  /** Human approval of the Factory patch gate. In mock mode this advances the
+   *  scripted demo director past the waiting_for_human hold; a no-op in live
+   *  mode (the real backend drives approval). */
+  approve: () => void;
 }
 
 const BACKEND = import.meta.env.VITE_REALTIME_BACKEND ?? 'mock';

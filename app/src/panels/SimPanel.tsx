@@ -1,105 +1,109 @@
+import { Suspense, lazy, useState } from 'react';
 import type { DeviceStatus } from '@prevent/contracts';
 import { PatientMonitor } from './pixi/PatientMonitor';
+import { ErrorBoundary } from './three/ErrorBoundary';
+import { is3dCapable } from './three/capability';
 
-// Left panel: patient monitor. Renders from the same device_status row as the
-// dashboard and the Arduino. The banner follows REPORTED (alarmActive) state, so
-// it stays green during the lie while the true vitals crash.
-//
-// The <PatientMonitor /> below is a PixiJS v8 canvas: three waveform lanes
-// (ECG, SpO2 pleth, respiration) scrolling right-to-left. ECG/SpO2 follow
-// REPORTED values so the device can lie; respiration follows TRUE fanOn and
-// flatlines when the ventilator stops.
+// The whole three/r3f/drei/postprocessing island is code-split here so it never
+// enters first paint; it loads only when the viewer is in 3D mode.
+const ICUScene3D = lazy(() => import('./three/ICUScene3D'));
+
+// Left panel: the ward view. Renders from the same device_status row as the
+// dashboard and the Arduino -> the three surfaces can never desync.
+//   - 3D (default on capable desktops): the bright cutaway ICU ward — rooms,
+//     people, and the judge as the patient in one gently-lit room.
+//   - 2D fallback: the PixiJS waveform monitor (also the Suspense loading state
+//     and the WebGL-failure fallback).
+// The scene itself carries the state (the judge's room warms on compromise), so
+// this frame stays calm: a slim label + the 2D/3D toggle, then the scene fills
+// the rest of the card.
 
 interface Props {
   device: DeviceStatus;
 }
 
-function Vital({
-  label,
-  value,
-  unit,
-  tone,
+type MonitorMode = '2d' | '3d';
+const MODE_STORAGE_KEY = 'prevent:simPanelMode';
+
+function initialMode(): MonitorMode {
+  try {
+    const stored = localStorage.getItem(MODE_STORAGE_KEY);
+    if (stored === '2d' || stored === '3d') return stored;
+  } catch {
+    // localStorage unavailable (private mode, blocked) -- fall through.
+  }
+  return is3dCapable() ? '3d' : '2d';
+}
+
+function ModeToggle({
+  mode,
+  onChange,
 }: {
-  label: string;
-  value: number;
-  unit: string;
-  tone: 'ok' | 'danger';
+  mode: MonitorMode;
+  onChange: (next: MonitorMode) => void;
 }) {
   return (
-    <div className="rounded-lg border border-border bg-surface p-4">
-      <div className="font-mono text-xs uppercase tracking-wider text-muted">
-        {label}
-      </div>
-      <div
-        className={`prevent-transition mt-1 font-mono text-5xl font-semibold ${
-          tone === 'ok' ? 'text-ok' : 'text-danger'
-        }`}
-      >
-        {value}
-        <span className="ml-1 text-lg text-muted">{unit}</span>
-      </div>
+    <div
+      role="group"
+      aria-label="Monitor view mode"
+      className="inline-flex overflow-hidden rounded-sm border border-border text-meta"
+    >
+      {(['3d', '2d'] as const).map((m) => (
+        <button
+          key={m}
+          type="button"
+          aria-pressed={mode === m}
+          onClick={() => onChange(m)}
+          className={`state-transition px-2.5 py-1 uppercase tracking-wide ${
+            mode === m
+              ? 'bg-accent-bg text-accent-fg'
+              : 'text-text-muted hover:text-text-secondary'
+          }`}
+        >
+          {m}
+        </button>
+      ))}
     </div>
   );
 }
 
 export function SimPanel({ device }: Props) {
-  const lying =
-    device.reportedHr !== device.trueHr ||
-    device.reportedSpo2 !== device.trueSpo2;
-  const bannerOk = !device.alarmActive;
+  const [mode, setMode] = useState<MonitorMode>(initialMode);
+  const changeMode = (next: MonitorMode) => {
+    setMode(next);
+    try {
+      localStorage.setItem(MODE_STORAGE_KEY, next);
+    } catch {
+      // persistence is best-effort; the choice still applies this session.
+    }
+  };
 
   return (
     <section
-      aria-label="Patient monitor simulation"
-      className="flex min-h-0 flex-col gap-4 border-b border-border p-5 lg:border-r lg:border-b-0"
+      aria-label="Patient ward"
+      className="flex h-full min-h-0 flex-col"
     >
-      <div className="flex items-center justify-between">
-        <h2 className="text-sm font-semibold uppercase tracking-wider text-muted">
-          Bedside monitor
-        </h2>
-        <span className="font-mono text-xs text-muted">
-          fan: {device.fanOn ? 'ON' : 'OFF'}
-        </span>
+      <div className="flex items-center justify-between border-b border-border px-4 py-2.5">
+        <div className="flex items-baseline gap-2">
+          <h2 className="text-overline uppercase text-text-muted">Patient ward</h2>
+          <span className="text-meta text-text-muted">· room 2 · you</span>
+        </div>
+        <ModeToggle mode={mode} onChange={changeMode} />
       </div>
 
-      <div
-        className={`prevent-transition rounded-lg px-4 py-2 text-center font-mono text-sm font-semibold ${
-          bannerOk ? 'bg-ok/15 text-ok' : 'pulse bg-danger/20 text-danger'
-        }`}
-      >
-        {bannerOk ? 'NORMAL' : 'ALARM'}
-      </div>
-
-      <PatientMonitor device={device} />
-
-      <div>
-        <div className="mb-2 font-mono text-xs uppercase tracking-wider text-muted">
-          Displayed (reported)
-        </div>
-        <div className="grid grid-cols-2 gap-3">
-          <Vital label="HR" value={device.reportedHr} unit="bpm" tone="ok" />
-          <Vital label="SpO2" value={device.reportedSpo2} unit="%" tone="ok" />
-        </div>
-      </div>
-
-      <div>
-        <div className="mb-2 font-mono text-xs uppercase tracking-wider text-muted">
-          Patient (true)
-        </div>
-        <div className="grid grid-cols-2 gap-3">
-          <Vital
-            label="HR"
-            value={device.trueHr}
-            unit="bpm"
-            tone={lying ? 'danger' : 'ok'}
-          />
-          <Vital
-            label="SpO2"
-            value={device.trueSpo2}
-            unit="%"
-            tone={lying ? 'danger' : 'ok'}
-          />
-        </div>
+      <div className="relative flex min-h-0 flex-1 flex-col p-3">
+        {mode === '3d' ? (
+          <ErrorBoundary fallback={<PatientMonitor device={device} />}>
+            <Suspense fallback={<PatientMonitor device={device} />}>
+              <ICUScene3D
+                device={device}
+                fallback={<PatientMonitor device={device} />}
+              />
+            </Suspense>
+          </ErrorBoundary>
+        ) : (
+          <PatientMonitor device={device} />
+        )}
       </div>
     </section>
   );

@@ -1,74 +1,187 @@
 @import "tailwindcss";
 
+/* =========================================================================
+   PreVent Design Guide — single source of truth for color, type, spacing.
+   Restrained: a full neutral ramp + ONE accent (blue). Red / amber / green
+   are EVENTS, never chrome — each appears only at its one beat.
+   ========================================================================= */
+
 @theme {
-  --color-bg: #0b0f14;
-  --color-surface: #111821;
-  --color-surface-2: #17212c;
-  --color-border: #1f2b38;
-  --color-text: #e6edf3;
-  --color-muted: #8b9aab;
-  --color-accent: #38bdf8;
-  --color-ok: #22c55e;
-  --color-warn: #f59e0b;
-  --color-danger: #ef4444;
-  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+  /* ===== NEUTRAL RAMP — the backbone (~90% of the UI) ===== */
+  --color-bg:             #0a0a0c; /* page plane                        */
+  --color-surface:        #121214; /* card / panel                      */
+  --color-surface-2:      #1a1a1e; /* nested block, input, inactive     */
+  --color-surface-3:      #242429; /* hover / pressed fill              */
+
+  --color-border:         #26262b; /* default 1px hairline              */
+  --color-border-strong:  #33333a; /* emphasis + spinner track          */
+
+  --color-text:           #ededef; /* primary copy (not pure white)     */
+  --color-text-secondary: #a1a1ac; /* secondary copy, spinner head      */
+  --color-text-muted:     #7e7e8a; /* timestamps, axis, captions        */
+
+  /* ===== ONE ACCENT: brand blue (now / active / interactive) ===== */
+  --color-blue:           #0097fe;
+  --color-accent:         #0097fe; /* alias — keeps existing refs valid */
+  --color-accent-fg:      #4db5ff; /* accent TEXT/icons on dark (AA)    */
+  --color-accent-hover:   #0b7bfe;
+  --color-accent-bg:      rgba(0, 151, 254, 0.12);
+  --color-accent-border:  rgba(0, 151, 254, 0.32);
+
+  /* ===== THREE RESERVED SEMANTICS (each only at its one beat) ===== */
+  --color-warn:        #f5a623; /* ONLY: human-approval marker + CTA     */
+  --color-warn-fg:     #ffc65c;
+  --color-warn-bg:     rgba(245, 166, 35, 0.12);
+
+  --color-danger:      #ef4444; /* ONLY: device lying / error / guardrail */
+  --color-danger-fg:   #ff7a7a;
+  --color-danger-bg:   rgba(239, 68, 68, 0.12);
+
+  --color-success:     #34d399; /* ONLY: 401 chip + final restore        */
+  --color-success-fg:  #5fe3b0;
+  --color-success-bg:  rgba(52, 211, 153, 0.12);
+
+  /* ===== FONTS (one sans; no display font) ===== */
+  --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, sans-serif;
   --font-mono: "JetBrains Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
-  --ease-prevent: cubic-bezier(0.4, 0, 0.2, 1);
+
+  /* ===== TYPE SCALE (compact dashboard scale) ===== */
+  --text-overline: 11px;
+  --text-overline--line-height: 16px;
+  --text-overline--letter-spacing: 0.04em;
+  --text-overline--font-weight: 600;
+  --text-meta: 12px;
+  --text-meta--line-height: 16px;
+  --text-sm: 13px;
+  --text-sm--line-height: 18px;
+  --text-base: 14px;
+  --text-base--line-height: 20px;
+  --text-base--letter-spacing: -0.006em;
+  --text-lg: 16px;
+  --text-lg--line-height: 22px;
+  --text-lg--letter-spacing: -0.01em;
+  --text-lg--font-weight: 500;
+  --text-xl: 20px;
+  --text-xl--line-height: 26px;
+  --text-xl--letter-spacing: -0.02em;
+  --text-xl--font-weight: 600;
+  --text-stat: 28px;
+  --text-stat--line-height: 30px;
+  --text-stat--letter-spacing: -0.02em;
+  --text-stat--font-weight: 600;
+
+  /* ===== RADIUS (10px dominant) ===== */
+  --radius-xs: 6px;
+  --radius-sm: 8px;
+  --radius-md: 10px;
+  --radius-lg: 12px;
+  --radius-pill: 999px;
+
+  /* ===== MOTION ===== */
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1); /* entrances, draw-in, settle */
+  --ease-state: cubic-bezier(0.4, 0, 0.2, 1); /* color/opacity micro-states */
+  --dur-micro: 120ms;
+  --dur-base: 220ms;
+  --dur-draw: 360ms;
+  --dur-settle: 600ms;
+
+  /* ===== ELEVATION — one card shadow, minimal (no glows) ===== */
+  --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.03);
+
+  --animate-spin-slow: spin 0.8s linear infinite;
 }
 
+/* ---------- Base ---------- */
+:root {
+  color-scheme: dark;
+}
 html,
 body,
 #root {
   height: 100%;
 }
-
 body {
   margin: 0;
   background: var(--color-bg);
   color: var(--color-text);
   font-family: var(--font-sans);
+  font-size: 14px;
+  line-height: 1.45;
   -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
 }
 
-/* One ~450ms ease for all meaningful motion. */
-.prevent-transition {
-  transition: all 450ms var(--ease-prevent);
-}
-
-@keyframes prevent-pulse {
-  0%,
-  100% {
-    opacity: 1;
-  }
-  50% {
-    opacity: 0.35;
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
   }
 }
 
-.pulse {
-  animation: prevent-pulse 1.1s var(--ease-prevent) infinite;
+/* ---------- Surface recipe — one card, no glows ---------- */
+.card {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-card);
+}
+.card--active {
+  border-color: var(--color-accent-border);
+} /* active = border, NOT a glow */
+.card--alert {
+  border-color: var(--color-danger);
+} /* lying  = border, NOT a glow */
+
+/* ---------- Focus ring (WIG: visible, :focus-visible, offset) ---------- */
+:where(a, button, [role="button"], input, [tabindex]):focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
 }
 
-/* react-diff-view ships a light theme; recolor via its own CSS variables so
-   the diff reads cleanly on our dark panel. Scoped to `.diff` so it wins
-   specificity against the library's own :root defaults (which import later). */
+/* ---------- The gray spinner — the ONLY in-progress indicator ---------- */
+.spinner {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  border: 1.5px solid var(--color-border-strong);
+  border-top-color: var(--color-text-secondary);
+  animation: var(--animate-spin-slow);
+}
+
+/* ---------- Scoped state transitions (never `transition: all`) ---------- */
+.state-transition {
+  transition:
+    color var(--dur-micro) var(--ease-state),
+    background-color var(--dur-micro) var(--ease-state),
+    border-color var(--dur-micro) var(--ease-state),
+    opacity var(--dur-micro) var(--ease-state);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .spinner {
+    animation: none;
+    border-top-color: var(--color-border-strong);
+  }
+  .state-transition {
+    transition-duration: 0.01ms;
+  }
+}
+
+/* ---------- react-diff-view: de-animated, two-color, only inside a disclosure ---------- */
 .diff {
   --diff-background-color: transparent;
-  --diff-text-color: #e6edf3;
-  --diff-font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo,
-    monospace;
-  --diff-gutter-insert-background-color: rgba(34, 197, 94, 0.18);
-  --diff-gutter-insert-text-color: #86efac;
-  --diff-gutter-delete-background-color: rgba(239, 68, 68, 0.18);
-  --diff-gutter-delete-text-color: #fca5a5;
-  --diff-code-insert-background-color: rgba(34, 197, 94, 0.1);
-  --diff-code-insert-text-color: #86efac;
-  --diff-code-delete-background-color: rgba(239, 68, 68, 0.1);
-  --diff-code-delete-text-color: #fca5a5;
-  --diff-code-insert-edit-background-color: rgba(34, 197, 94, 0.3);
-  --diff-code-delete-edit-background-color: rgba(239, 68, 68, 0.3);
+  --diff-text-color: var(--color-text);
+  --diff-font-family: var(--font-mono);
+  --diff-gutter-insert-background-color: var(--color-success-bg);
+  --diff-gutter-insert-text-color: var(--color-success-fg);
+  --diff-gutter-delete-background-color: var(--color-danger-bg);
+  --diff-gutter-delete-text-color: var(--color-danger-fg);
+  --diff-code-insert-background-color: rgba(52, 211, 153, 0.07);
+  --diff-code-insert-text-color: var(--color-success-fg);
+  --diff-code-delete-background-color: rgba(239, 68, 68, 0.07);
+  --diff-code-delete-text-color: var(--color-danger-fg);
   font-size: 12px;
 }
 .diff-decoration-content {
-  color: var(--color-muted);
+  color: var(--color-text-secondary);
 }

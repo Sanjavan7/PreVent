@@ -11,7 +11,10 @@ import type {
   AgentStatus,
   DeviceStatus,
   EventLogRow,
+  ExploitRun,
   Finding,
+  IrEvent,
+  PatchAttempt,
 } from '@prevent/contracts';
 
 import type { RealtimeState } from './useRealtime';
@@ -26,8 +29,18 @@ export function useRealtimeLive(): RealtimeState {
   const [agentRows, agentReady] = useTable(tables.agentStatus);
   const [findingRows, findingReady] = useTable(tables.findings);
   const [logRows, logReady] = useTable(tables.eventLog);
+  const [exploitRows, exploitReady] = useTable(tables.exploitRuns);
+  const [patchRows, patchReady] = useTable(tables.patchAttempts);
+  const [irRows, irReady] = useTable(tables.irEvents);
 
-  const ready = deviceReady && agentReady && findingReady && logReady;
+  const ready =
+    deviceReady &&
+    agentReady &&
+    findingReady &&
+    logReady &&
+    exploitReady &&
+    patchReady &&
+    irReady;
 
   return useMemo<RealtimeState>(() => {
     // Expect exactly one device_status row (id = 1). Fall back to the healthy
@@ -58,6 +71,20 @@ export function useRealtimeLive(): RealtimeState {
       (a, b) => b.createdAt - a.createdAt,
     );
 
+    // Newest-first for each of the three additive collections.
+    const exploitRuns: ExploitRun[] = [...(exploitRows as ExploitRun[])].sort(
+      (a, b) => b.deliveredAt - a.deliveredAt,
+    );
+    // The generated patch_attempts row carries an extra `proposedBy` identity
+    // and types `appliedAt` as `number | undefined`, so narrow via `unknown` to
+    // the frozen contract shape (mirrors realtime/src/backend/mock.ts).
+    const patchAttempts: PatchAttempt[] = (
+      [...patchRows] as unknown as PatchAttempt[]
+    ).sort((a, b) => b.proposedAt - a.proposedAt);
+    const irEvents: IrEvent[] = [...(irRows as IrEvent[])].sort(
+      (a, b) => b.ts - a.ts,
+    );
+
     return {
       mode: 'live',
       ready,
@@ -65,8 +92,21 @@ export function useRealtimeLive(): RealtimeState {
       agents,
       findings,
       eventLog,
+      exploitRuns,
+      patchAttempts,
+      irEvents,
       mockExploited: false,
       setMockExploited: NOOP,
+      approve: NOOP,
     };
-  }, [deviceRows, agentRows, findingRows, logRows, ready]);
+  }, [
+    deviceRows,
+    agentRows,
+    findingRows,
+    logRows,
+    exploitRows,
+    patchRows,
+    irRows,
+    ready,
+  ]);
 }

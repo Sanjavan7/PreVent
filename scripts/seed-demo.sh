@@ -30,6 +30,12 @@ call() {
   spacetime call --server "$SERVER" "$MODULE" "$@" >/dev/null
 }
 
+# update_agent_status upserts on agentName (a UNIQUE column). The module's init
+# seeds one row per stage keyed on the BARE stage name (ground/scan/generate/
+# deliver/patch/verify/restore). We MUST pass that same bare name as the first
+# arg so each call UPDATES the seeded row instead of INSERTing a duplicate
+# timeline row (the old "scan-agent"/"deliver-agent"/... keys never matched init).
+
 say() { printf "\033[36m• %s\033[0m\n" "$*"; }
 
 case "$PHASE" in
@@ -42,7 +48,7 @@ case "$PHASE" in
     say "scanner finds the real CWE-306 + a Bandit decoy"
     call record_finding "semgrep" "CVE-2019-6538" "device-service/app.py" 42 "ERROR" "Missing authentication on POST /device/command (CWE-306) — the real exploitable flaw" true
     call record_finding "bandit" "" "device-service/app.py" 12 "LOW" "debug=True flagged, but not the exploitable issue" false
-    call update_agent_status "scan-agent" "scan" "running" "Reading app.py; semgrep rule missing-auth tripped on line 42; bandit flagged debug=True — likely a decoy. Cross-checking POST /device/command for an auth decorator..." 0.72 "could still be a false positive; need to confirm no middleware is intercepting"
+    call update_agent_status "scan" "scan" "running" "Reading app.py; semgrep rule missing-auth tripped on line 42; bandit flagged debug=True — likely a decoy. Cross-checking POST /device/command for an auth decorator..." 0.72 "could still be a false positive; need to confirm no middleware is intercepting"
     call log_event "orchestrator" "SemGrep + Bandit scan complete; Claude triaging 2 findings"
     ;;
 
@@ -50,7 +56,7 @@ case "$PHASE" in
     say "attacker fires the unauthenticated POST — device LIES"
     # Fan STOPS (true), but reported vitals and alarm stay healthy = the deception
     call update_device_status false 35 82 72 98 false true "stop_fan (unauthenticated)"
-    call update_agent_status "deliver-agent" "deliver" "done" "POST /device/command 200 OK — fan actuator responded to unsigned payload. True vitals degrading. Reported telemetry still green." 0.97 ""
+    call update_agent_status "deliver" "deliver" "done" "POST /device/command 200 OK — fan actuator responded to unsigned payload. True vitals degrading. Reported telemetry still green." 0.97 ""
     call log_event "orchestrator" "Exploit delivered; device obeyed unauthenticated command"
     ;;
 
@@ -62,7 +68,7 @@ case "$PHASE" in
 
   self-correct)
     say "patch agent catches its own mistake"
-    call update_agent_status "patch-agent" "patch" "running" "REJECTED my own patch — v1 broke the emergency override path. Revising: scope the auth check to /device/command only." 0.58 "need to re-run the full test matrix before resubmitting"
+    call update_agent_status "patch" "patch" "running" "REJECTED my own patch — v1 broke the emergency override path. Revising: scope the auth check to /device/command only." 0.58 "need to re-run the full test matrix before resubmitting"
     call log_event "patch-agent" "Self-correction: v1 broke emergency override; revising"
     ;;
 
@@ -73,14 +79,14 @@ case "$PHASE" in
 
   patch-pending)
     say "Factory Droid wrote the fix; awaiting human approval"
-    call update_agent_status "patch-agent" "patch" "waiting_for_human" "Patch written and sandboxed: require X-Device-Token on POST /device/command; drop reportedOverrides. 41/41 unit tests green. Exploit proof captured." 0.91 "needs human sign-off before deployment"
+    call update_agent_status "patch" "patch" "waiting_for_human" "Patch written and sandboxed: require X-Device-Token on POST /device/command; drop reportedOverrides. 41/41 unit tests green. Exploit proof captured." 0.91 "needs human sign-off before deployment"
     call log_event "patch-agent" "Diff ready in device-service/app.py — awaiting APPROVE"
     ;;
 
   verified)
     say "patch deployed; same exploit now bounces off 401; vitals restored"
-    call update_agent_status "verify-agent" "verify" "done" "Replayed the exact exploit payload: server returned 401 Unauthorized. Fan state unchanged. true_state matches reported. No lie detected." 0.99 ""
-    call update_agent_status "restore-agent" "restore" "done" "Device restored to healthy baseline; incident report generated." 0.99 ""
+    call update_agent_status "verify" "verify" "done" "Replayed the exact exploit payload: server returned 401 Unauthorized. Fan state unchanged. true_state matches reported. No lie detected." 0.99 ""
+    call update_agent_status "restore" "restore" "done" "Device restored to healthy baseline; incident report generated." 0.99 ""
     call update_device_status true 72 98 72 98 false false "verified"
     call log_event "orchestrator" "Loop closed: find → exploit → patch → verify → restore"
     ;;

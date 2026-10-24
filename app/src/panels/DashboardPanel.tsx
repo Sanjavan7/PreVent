@@ -1,569 +1,375 @@
-// Right panel: the "glass skull" dashboard.
-// Left column: an agent timeline you can watch think.
-// Right column: the evidence stack (findings, telemetry-vs-reality, diff, compliance, log).
+// Right dashboard — thin composition root (Stage 2).
 //
-// Everything here reads the SAME rows the Pixi monitor + Arduino see, so the two
-// panels can never desync. The dashboard adds three signature "trust" surfaces that
-// make the pipeline feel honest instead of magical:
+// ONE calm 640px column: ① header strip, ② activity feed (steps appear as they
+// happen; finished collapse to one quiet line; exactly one dim queued hint
+// ahead; artifacts live INSIDE their step behind disclosures), ③ pinned Truth
+// Strip. Neutrals + ONE blue; red only for lie/exploit, green only for the 401
+// payoff. OWNER OVERRIDE: zero amber — the approval gate + needs-you marker are
+// BLUE (handled in the gate/marker components).
 //
-//   - Streaming reasoning card inside the active timeline node (typewriter-ish
-//     autoscroll of the reasoning string + a visible confidence gauge).
-//   - Self-Correction / Guardrail Blocked / Awaiting Approval banners that
-//     surface conditionally based on agent state and the event log.
-//   - A Telemetry-vs-Reality card that "snaps" red when the device is lying.
-//
-// motion/react is used sparingly -- motion is for meaning, not decoration.
+// This root assembles the PipelineValue from the single realtime subscription
+// so the feed, the gate and the truth strip can never desync, derives the
+// activity entries with a MEMOIZED pure selector (never an effect), and injects
+// each stage's sponsor-critical artifact via renderExtras so the feed stays
+// generic.
 
-import { useEffect, useMemo, useRef } from 'react';
-import { AnimatePresence, motion } from 'motion/react';
-import { Diff, Hunk, parseDiff } from 'react-diff-view';
-import 'react-diff-view/style/index.css';
+import { useCallback, useMemo, useState } from 'react';
+import { motion, useReducedMotion } from 'motion/react';
 import type {
-  AgentState,
   AgentStatus,
   DeviceStatus,
   EventLogRow,
+  ExploitRun,
   Finding,
-  Stage,
+  PatchAttempt,
 } from '@prevent/contracts';
 
+import { PipelineProvider, type PipelineValue } from '../components/pipeline/PipelineProvider';
+import { deriveActivity, type ActivityEntry } from '../components/pipeline/deriveActivity';
+import { ActivityFeed } from '../components/feed/ActivityFeed';
+import { ApprovalGate } from '../components/gate/ApprovalGate';
+import { CompactDiff } from '../components/primitives/CompactDiff';
+import { Disclosure } from '../components/primitives/Disclosure';
+import { TruthStrip } from '../components/truth/TruthStrip';
+import { requestMockApprove } from '../realtime/useRealtimeMock';
+import { SPRING } from '../lib/motion';
+
 interface Props {
+  device: DeviceStatus;
   agents: AgentStatus[];
   findings: Finding[];
   eventLog: EventLogRow[];
-  device: DeviceStatus;
+  exploitRuns: ExploitRun[];
+  patchAttempts: PatchAttempt[];
+  /** SpacetimeDB liveness for the header chip (true in the demo). */
+  live?: boolean;
 }
 
-// --- Stage order ---------------------------------------------------------
-// The visible spine always shows every stage so judges see progress even
-// before the orchestrator has emitted an agent_status row for it.
-const STAGES: readonly Stage[] = [
-  'ground',
-  'scan',
-  'generate',
-  'deliver',
-  'patch',
-  'verify',
-  'restore',
-];
+const DEVICE_LABEL = 'Ventilator · Lab unit #0001';
+const FLEET_SIZE = 3412;
+const TOTAL_STAGES = 7;
 
-const STAGE_LABEL: Record<Stage, string> = {
-  ground: 'Ground',
-  scan: 'Scan',
-  generate: 'Generate',
-  deliver: 'Deliver',
-  patch: 'Patch',
-  verify: 'Verify',
-  restore: 'Restore',
-};
+// Short fallback diff when no real patch_attempts row carries one yet.
+const SAMPLE_DIFF = `--- a/device-service/app.py
++++ b/device-service/app.py
+@@ -38,7 +38,12 @@ app = Flask(__name__)
+ @app.route("/device/command", methods=["POST"])
+ def device_command():
+-    payload = request.get_json(force=True)
++    token = request.headers.get("X-Device-Token")
++    if not token or not constant_time_compare(token, DEVICE_TOKEN):
++        return jsonify({"error": "unauthorized"}), 401
++    payload = request.get_json(force=True)
++    payload.pop("reportedOverrides", None)
+     action = payload.get("action")
+     return apply_command(action, payload)`;
 
-const STATE_PILL: Record<AgentState, string> = {
-  idle: 'border-border bg-surface-2 text-muted',
-  running: 'border-accent/40 bg-accent/15 text-accent',
-  waiting_for_human: 'border-warn/40 bg-warn/15 text-warn',
-  done: 'border-ok/40 bg-ok/15 text-ok',
-  error: 'border-danger/40 bg-danger/15 text-danger',
-};
+// ---------- Header strip (①) ------------------------------------------------
 
-const STATE_DOT: Record<AgentState, string> = {
-  idle: 'bg-border',
-  running: 'bg-accent shadow-[0_0_0_4px_rgba(56,189,248,0.15)]',
-  waiting_for_human: 'bg-warn shadow-[0_0_0_4px_rgba(255,176,32,0.15)]',
-  done: 'bg-ok',
-  error: 'bg-danger shadow-[0_0_0_4px_rgba(255,77,79,0.15)]',
-};
-
-// --- Timeline ------------------------------------------------------------
-
-function ConfidenceGauge({
-  value,
-  uncertainty,
-}: {
-  value: number;
-  uncertainty?: string;
-}) {
-  const pct = Math.max(0, Math.min(100, Math.round(value * 100)));
-  const tone =
-    pct >= 80 ? 'bg-ok' : pct >= 55 ? 'bg-accent' : pct >= 30 ? 'bg-warn' : 'bg-danger';
+function StatusChip({ compromised, patched }: { compromised: boolean; patched: boolean }) {
+  const label = compromised ? 'Compromised' : patched ? 'Patched' : 'Secure';
+  const tone = compromised ? 'text-danger-fg' : 'text-text-secondary';
+  const dot = compromised ? 'var(--color-danger)' : 'var(--color-text-muted)';
   return (
-    <div className="mt-2">
-      <div className="mb-1 flex items-center justify-between font-mono text-[10px] uppercase tracking-wider text-muted">
-        <span>Confidence</span>
-        <span className="tabular-nums">{pct}%</span>
-      </div>
-      <div className="h-1.5 overflow-hidden rounded-full bg-surface-2">
-        <motion.div
-          className={`h-full ${tone}`}
-          initial={false}
-          animate={{ width: `${pct}%` }}
-          transition={{ duration: 0.45, ease: [0.22, 1, 0.36, 1] }}
-        />
-      </div>
-      {uncertainty ? (
-        <p className="mt-1 font-mono text-[11px] leading-snug text-muted">
-          <span className="text-warn">!</span> {uncertainty}
-        </p>
-      ) : null}
-    </div>
+    <span className={`inline-flex items-center gap-1.5 text-meta ${tone}`}>
+      <span aria-hidden className="block h-1.5 w-1.5 rounded-full" style={{ background: dot }} />
+      {label}
+    </span>
   );
 }
 
-function ReasoningStream({ text }: { text: string }) {
-  // Keep the newest token visible: on text change, scroll to bottom.
-  const ref = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    const el = ref.current;
-    if (!el) return;
-    el.scrollTop = el.scrollHeight;
-  }, [text]);
+function LiveChip({ live }: { live: boolean }) {
   return (
-    <div
-      ref={ref}
-      className="mt-2 max-h-28 overflow-y-auto rounded-md border border-border bg-bg/60 p-2 font-mono text-[11px] leading-relaxed text-muted"
+    <span
+      className="inline-flex items-center gap-1.5 rounded-xs border border-border bg-surface-2 px-1.5 py-0.5 text-meta text-text-muted"
+      title="One shared SpacetimeDB row drives this screen, the monitor, and the device."
     >
-      {text || <span className="opacity-50">(waiting for the model to speak...)</span>}
-    </div>
-  );
-}
-
-function StageRow({
-  stage,
-  agent,
-  isLast,
-}: {
-  stage: Stage;
-  agent?: AgentStatus;
-  isLast: boolean;
-}) {
-  const state: AgentState = agent?.state ?? 'idle';
-  const active = state === 'running' || state === 'waiting_for_human';
-  return (
-    <li className="relative pl-7">
-      {/* Spine */}
-      {!isLast && (
-        <span className="absolute left-[11px] top-5 h-full w-px bg-border" aria-hidden />
-      )}
-      {/* Node dot */}
       <span
-        className={`absolute left-[6px] top-[6px] inline-block h-3 w-3 rounded-full transition-shadow ${STATE_DOT[state]}`}
         aria-hidden
+        className="block h-1.5 w-1.5 rounded-full"
+        style={{ background: live ? 'var(--color-accent)' : 'var(--color-text-muted)' }}
       />
-      <div className="flex items-center gap-2">
-        <span className="font-mono text-xs uppercase tracking-wider text-text">
-          {STAGE_LABEL[stage]}
-        </span>
-        <span
-          className={`rounded-full border px-2 py-0.5 font-mono text-[10px] uppercase tracking-wider ${STATE_PILL[state]}`}
-        >
-          {state.replace('_', ' ')}
-        </span>
-        {agent?.agentName ? (
-          <span className="font-mono text-[10px] text-muted">{agent.agentName}</span>
-        ) : null}
-      </div>
-
-      <AnimatePresence initial={false}>
-        {active && agent ? (
-          <motion.div
-            key="active"
-            initial={{ opacity: 0, height: 0 }}
-            animate={{ opacity: 1, height: 'auto' }}
-            exit={{ opacity: 0, height: 0 }}
-            transition={{ duration: 0.25, ease: [0.22, 1, 0.36, 1] }}
-            className="overflow-hidden"
-          >
-            <ReasoningStream text={agent.reasoning} />
-            <ConfidenceGauge
-              value={agent.confidence ?? 0}
-              uncertainty={agent.uncertainty}
-            />
-          </motion.div>
-        ) : null}
-      </AnimatePresence>
-
-      <div className="h-4" />
-    </li>
+      SpacetimeDB · {live ? 'live' : 'offline'}
+    </span>
   );
 }
 
-function AgentTimeline({ agents }: { agents: AgentStatus[] }) {
-  const byStage = useMemo(() => {
-    const m = new Map<Stage, AgentStatus>();
-    for (const a of agents) m.set(a.stage, a);
-    return m;
-  }, [agents]);
+function ProgressBars({ done }: { done: number }) {
   return (
-    <div>
-      <h3 className="mb-3 text-sm font-semibold uppercase tracking-wider text-muted">
-        Agent timeline
-      </h3>
-      <ol className="relative">
-        {STAGES.map((s, i) => (
-          <StageRow
-            key={s}
-            stage={s}
-            agent={byStage.get(s)}
-            isLast={i === STAGES.length - 1}
+    <div className="flex w-full items-center gap-2">
+      <div className="flex flex-1 items-center gap-1" aria-hidden>
+        {Array.from({ length: TOTAL_STAGES }, (_, i) => (
+          <span
+            key={i}
+            className="h-1 flex-1 rounded-pill"
+            style={{ background: i < done ? 'var(--color-accent)' : 'var(--color-border)' }}
           />
         ))}
-      </ol>
+      </div>
+      <span className="shrink-0 text-meta tabular-nums text-text-muted">
+        {done} / {TOTAL_STAGES}
+      </span>
     </div>
   );
 }
 
-// --- Trust cards ---------------------------------------------------------
-
-function SelfCorrectionCard({ agent }: { agent: AgentStatus }) {
-  return (
-    <motion.aside
-      initial={{ opacity: 0, y: 8 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.3 }}
-      className="rounded-lg border border-warn/40 bg-warn/10 p-3"
-      role="status"
-    >
-      <div className="flex items-center gap-2 font-mono text-xs uppercase tracking-wider text-warn">
-        <span>↺ Self-correction</span>
-        <span className="opacity-60">· {agent.agentName}</span>
-      </div>
-      <p className="mt-1 text-sm text-text">
-        {agent.reasoning ||
-          'Rejected my own output — the fix broke the emergency override. Revising.'}
-      </p>
-    </motion.aside>
-  );
-}
-
-function GuardrailBlockedCard({ event }: { event: EventLogRow }) {
-  return (
-    <motion.aside
-      initial={{ opacity: 0, y: 8 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.3 }}
-      className="rounded-lg border border-danger/40 bg-danger/10 p-3"
-      role="status"
-    >
-      <div className="flex items-center gap-2 font-mono text-xs uppercase tracking-wider text-danger">
-        <span>⛔ Action refused · sandbox</span>
-      </div>
-      <p className="mt-1 font-mono text-xs text-text">{event.text}</p>
-    </motion.aside>
-  );
-}
-
-function AwaitingApprovalCard({
-  agent,
-  onApprove,
+function HeaderStrip({
+  compromised,
+  patched,
+  done,
+  live,
 }: {
-  agent: AgentStatus;
-  onApprove?: () => void;
+  compromised: boolean;
+  patched: boolean;
+  done: number;
+  live: boolean;
 }) {
   return (
-    <motion.aside
-      initial={{ opacity: 0, y: 8 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.3 }}
-      className="rounded-lg border border-warn/50 bg-warn/10 p-3"
-      role="dialog"
-    >
-      <div className="flex items-center gap-2 font-mono text-xs uppercase tracking-wider text-warn">
-        <span>⏸ Awaiting human approval</span>
-        <span className="opacity-60">· {STAGE_LABEL[agent.stage]}</span>
-      </div>
-      <ul className="mt-2 space-y-1 font-mono text-xs text-muted">
-        <li>· patch written by the model</li>
-        <li>· unit tests ran green in the sandbox</li>
-        <li>· exploit proof captured (pre-patch)</li>
-      </ul>
-      <button
-        type="button"
-        onClick={onApprove}
-        className="prevent-transition pulse mt-3 w-full rounded-md bg-warn px-4 py-2 font-mono text-sm font-semibold uppercase tracking-wider text-bg hover:brightness-110"
+    <header className="flex flex-wrap items-center gap-x-3 gap-y-2 border-b border-border px-4 py-3">
+      <span className="text-base font-medium text-text">{DEVICE_LABEL}</span>
+      <StatusChip compromised={compromised} patched={patched} />
+      <LiveChip live={live} />
+      <span className="ml-auto text-meta tabular-nums text-text-muted">
+        1 of {FLEET_SIZE.toLocaleString()} devices
+      </span>
+      <ProgressBars done={done} />
+    </header>
+  );
+}
+
+// ---------- In-step artifacts (injected via renderExtras) -------------------
+
+/** One-line inline sub-event: self-correction (muted) or guardrail refusal (danger). */
+function StepSubEvent({ kind, text }: { kind: 'self-correct' | 'guardrail'; text: string }) {
+  const danger = kind === 'guardrail';
+  return (
+    <p className={`flex items-start gap-1.5 text-meta ${danger ? 'text-danger-fg' : 'text-text-muted'}`}>
+      <span aria-hidden className="shrink-0">
+        {danger ? '⌀' : '↻'}
+      </span>
+      <span>{text}</span>
+    </p>
+  );
+}
+
+/** The attack, as one compact mono request card living in the deliver step. The
+ *  status token is red while the device is compromised. */
+function RequestCard({ compromised }: { compromised: boolean }) {
+  return (
+    <div className="flex flex-wrap items-center gap-x-2 gap-y-1 rounded-sm border border-border bg-surface-2 px-2.5 py-1.5 font-mono text-meta">
+      <span className="text-text-secondary">→ POST /device/command</span>
+      <span className="text-text-muted">no auth · CWE-306</span>
+      <span
+        className="ml-auto rounded-xs px-1.5 py-0.5"
+        style={
+          compromised
+            ? { background: 'var(--color-danger-bg)', color: 'var(--color-danger-fg)' }
+            : { background: 'var(--color-surface-3)', color: 'var(--color-text-muted)' }
+        }
       >
-        Approve &amp; deploy
-      </button>
-    </motion.aside>
+        {compromised ? '200 OK' : '—'}
+      </span>
+    </div>
   );
 }
 
-// Simple heuristic: catch "self-correction" moments from the reasoning text so
-// the dashboard can light up even before we have a dedicated DB field. The
-// orchestrator can also force the beat by prefixing the text with "REJECTED".
-function detectSelfCorrection(agents: AgentStatus[]): AgentStatus | null {
-  for (const a of agents) {
-    const t = (a.reasoning || '').toLowerCase();
-    if (t.includes('rejected') || t.includes('revising') || t.includes('self-correct')) {
-      return a;
-    }
-  }
-  return null;
-}
-
-function detectGuardrailRefusal(log: EventLogRow[]): EventLogRow | null {
-  for (const e of log) {
-    const t = (e.text || '').toLowerCase();
-    if (
-      e.actor === 'guardrail' ||
-      t.includes('action refused') ||
-      t.includes('sandbox refused')
-    ) {
-      return e;
-    }
-  }
-  return null;
-}
-
-// --- Evidence cards ------------------------------------------------------
-
-function FindingsCard({ findings }: { findings: Finding[] }) {
+/** The 401 payoff — the ONLY green + the ONLY SPRING.snap overshoot, fired once
+ *  when the verify step is reached. */
+function Payoff401() {
+  const reduce = useReducedMotion();
   return (
-    <section className="rounded-lg border border-border bg-surface p-3">
-      <h4 className="mb-2 font-mono text-xs uppercase tracking-wider text-muted">
-        Findings
-      </h4>
-      {findings.length === 0 ? (
-        <p className="font-mono text-xs text-muted">
-          No findings yet — scanner has not reported.
-        </p>
-      ) : (
-        <ul className="space-y-2">
-          {findings.map((f) => (
-            <li
-              key={f.id}
-              className={`rounded-md border p-2 text-sm ${
-                f.isTheRealOne
-                  ? 'border-danger/50 bg-danger/10'
-                  : 'border-border bg-surface-2'
-              }`}
-            >
-              <div className="flex flex-wrap items-center gap-x-2 gap-y-1 font-mono text-[11px] text-muted">
-                <span className="rounded bg-bg/60 px-1 py-0.5 text-text">
-                  {f.scanner}
-                </span>
-                <span>
-                  {f.file}:{f.line}
-                </span>
-                <span className="uppercase">{f.severity}</span>
-                {f.cveRef ? <span className="text-accent">{f.cveRef}</span> : null}
-                {f.isTheRealOne ? (
-                  <span className="rounded bg-danger/20 px-1 py-0.5 text-danger">
-                    REAL
-                  </span>
-                ) : null}
-              </div>
-              <p className="mt-1">{f.claudeVerdict}</p>
-            </li>
-          ))}
-        </ul>
-      )}
-    </section>
+    <div className="space-y-1.5">
+      <p className="text-sm text-text-secondary">Same request, replayed → 401 Unauthorized.</p>
+      <motion.span
+        className="inline-flex items-center rounded-xs px-2 py-0.5 font-mono text-meta font-medium"
+        style={{
+          background: 'var(--color-success-bg)',
+          color: 'var(--color-success-fg)',
+          boxShadow: 'inset 0 -2px 0 var(--color-success)',
+        }}
+        initial={reduce ? false : { scale: 0.6, opacity: 0 }}
+        animate={{ scale: 1, opacity: 1 }}
+        transition={reduce ? { duration: 0 } : SPRING.snap}
+      >
+        401 Unauthorized
+      </motion.span>
+    </div>
   );
 }
 
-function TelemetryVsReality({ device }: { device: DeviceStatus }) {
-  const hrLying = device.reportedHr !== device.trueHr;
-  const spo2Lying = device.reportedSpo2 !== device.trueSpo2;
-  const lying = hrLying || spo2Lying;
-  return (
-    <motion.section
-      initial={false}
-      animate={{
-        borderColor: lying ? 'rgba(255,77,79,0.5)' : 'rgba(31,43,56,1)',
-        backgroundColor: lying ? 'rgba(255,77,79,0.08)' : 'rgba(17,24,33,1)',
-      }}
-      transition={{ duration: 0.25 }}
-      className="rounded-lg border p-3"
-    >
-      <div className="mb-2 flex items-center justify-between">
-        <h4 className="font-mono text-xs uppercase tracking-wider text-muted">
-          Telemetry vs reality
-        </h4>
-        <AnimatePresence initial={false}>
-          {lying ? (
-            <motion.span
-              key="lying"
-              initial={{ opacity: 0, scale: 0.9 }}
-              animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.9 }}
-              className="rounded-full border border-danger/50 bg-danger/15 px-2 py-0.5 font-mono text-[10px] uppercase tracking-wider text-danger"
-            >
-              The device is lying
-            </motion.span>
-          ) : (
-            <span className="rounded-full border border-ok/40 bg-ok/15 px-2 py-0.5 font-mono text-[10px] uppercase tracking-wider text-ok">
-              Match
-            </span>
-          )}
-        </AnimatePresence>
-      </div>
-      <div className="grid grid-cols-3 gap-y-1 font-mono text-xs tabular-nums">
-        <span />
-        <span className="text-muted">reported</span>
-        <span className="text-muted">actual</span>
-        <span className="text-muted">HR</span>
-        <span>{device.reportedHr}</span>
-        <span className={hrLying ? 'text-danger' : 'text-ok'}>{device.trueHr}</span>
-        <span className="text-muted">SpO₂</span>
-        <span>{device.reportedSpo2}</span>
-        <span className={spo2Lying ? 'text-danger' : 'text-ok'}>
-          {device.trueSpo2}
-        </span>
-      </div>
-    </motion.section>
-  );
-}
-
-// Short canned diff shown when no real patch exists yet. The orchestrator will
-// stream a real unified diff into the module (we'll upgrade this to render that
-// diff when the patch_attempts row carries it).
-const SAMPLE_DIFF = `diff --git a/device-service/app.py b/device-service/app.py
---- a/device-service/app.py
-+++ b/device-service/app.py
-@@ -40,7 +40,12 @@ def command():
--    body = request.get_json(silent=True) or {}
--    action = body.get('action')
--    return _apply(action, body)
-+    token = request.headers.get('X-Device-Token')
-+    if not token or not _valid_token(token):
-+        return jsonify({'error': 'missing_auth'}), 401
-+    body = request.get_json(silent=True) or {}
-+    action = body.get('action')
-+    body.pop('reportedOverrides', None)  # ignore untrusted overrides
-+    return _apply(action, body)
-`;
-
-function PatchDiffCard({ hasPatch }: { hasPatch: boolean }) {
-  const files = useMemo(() => parseDiff(SAMPLE_DIFF, { nearbySequences: 'zip' }), []);
-  return (
-    <section className="rounded-lg border border-border bg-surface p-3">
-      <div className="mb-2 flex items-center justify-between">
-        <h4 className="font-mono text-xs uppercase tracking-wider text-muted">
-          Patch — CWE-306 missing auth
-        </h4>
-        <span
-          className={`rounded-full border px-2 py-0.5 font-mono text-[10px] uppercase tracking-wider ${
-            hasPatch
-              ? 'border-ok/40 bg-ok/15 text-ok'
-              : 'border-border bg-surface-2 text-muted'
-          }`}
-        >
-          {hasPatch ? 'ready for review' : 'pending'}
-        </span>
-      </div>
-      <div className="overflow-hidden rounded-md border border-border bg-bg text-[12px]">
-        {files.map((f, i) => (
-          <Diff
-            key={i}
-            viewType="unified"
-            diffType={f.type}
-            hunks={f.hunks}
-            gutterType="none"
-          >
-            {(hunks) =>
-              hunks.map((h) => <Hunk key={h.content} hunk={h} />)
-            }
-          </Diff>
-        ))}
-      </div>
-    </section>
-  );
-}
-
-function ComplianceCard({ device }: { device: DeviceStatus }) {
+/** The FDA §524B audit receipt behind a disclosure on the final (restore) step. */
+function AuditReceipt({ device }: { device: DeviceStatus }) {
   const ts = new Date(device.updatedAt || Date.now()).toISOString();
   return (
-    <section className="rounded-lg border border-accent/30 bg-accent/5 p-3">
-      <h4 className="mb-2 font-mono text-xs uppercase tracking-wider text-accent">
-        FDA §524B · auditable receipt
-      </h4>
-      <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 font-mono text-xs">
-        <dt className="text-muted">Device</dt>
-        <dd>Model VENT-SIM / Lab unit #0001</dd>
-        <dt className="text-muted">Finding</dt>
-        <dd>
-          CWE-306 · <span className="text-accent">CVE-2019-6538</span>
-        </dd>
-        <dt className="text-muted">Patch</dt>
-        <dd>require X-Device-Token · ignore untrusted overrides</dd>
-        <dt className="text-muted">Verify</dt>
-        <dd>same exploit → <span className="text-ok">401</span> after fix</dd>
-        <dt className="text-muted">Last update</dt>
-        <dd className="tabular-nums">{ts}</dd>
-      </dl>
-    </section>
+    <Disclosure trigger="Audit receipt">
+      <div className="rounded-sm border border-border bg-surface-2 p-3">
+        <div className="mb-2 flex items-center gap-2 text-overline uppercase tracking-wide text-text-muted">
+          <span>FDA §524B</span>
+          <span style={{ color: 'var(--color-success-fg)' }}>✓</span>
+        </div>
+        <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 font-mono text-meta">
+          <dt className="text-text-muted">Device</dt>
+          <dd className="text-text-secondary">VENT-SIM · Lab unit #0001</dd>
+          <dt className="text-text-muted">Finding</dt>
+          <dd className="text-text-secondary">CWE-306 · CVE-2019-6538 (read-only ref)</dd>
+          <dt className="text-text-muted">Patch</dt>
+          <dd className="text-text-secondary">require X-Device-Token · ignore untrusted overrides</dd>
+          <dt className="text-text-muted">Verify</dt>
+          <dd className="text-text-secondary">same exploit replayed → 401 after fix</dd>
+          <dt className="text-text-muted">Recorded</dt>
+          <dd className="tabular-nums text-text-secondary">{ts}</dd>
+        </dl>
+      </div>
+    </Disclosure>
   );
 }
 
-function EventLogCard({ log }: { log: EventLogRow[] }) {
+/** The one real finding in plain language; scanner / file:line / severity / CVE
+ *  behind "Details" (spec B4 — keep it clean, no raw noise up front). */
+function FindingDetails({ findings }: { findings: Finding[] }) {
+  const real = findings.find((f) => f.isTheRealOne) ?? findings[0];
+  if (!real) return null;
   return (
-    <section className="rounded-lg border border-border bg-surface p-3">
-      <h4 className="mb-2 font-mono text-xs uppercase tracking-wider text-muted">
-        Event log
-      </h4>
-      {log.length === 0 ? (
-        <p className="font-mono text-xs text-muted">
-          Pipeline idle. Device healthy.
-        </p>
-      ) : (
-        <ul className="max-h-48 space-y-1 overflow-y-auto font-mono text-xs">
-          {log.map((e) => (
-            <li key={e.id} className="flex gap-2">
-              <span className="shrink-0 text-accent">{e.actor}</span>
-              <span className="text-muted">{e.text}</span>
-            </li>
-          ))}
-        </ul>
-      )}
-    </section>
+    <div className="space-y-1.5">
+      <p className="text-sm text-text-secondary">
+        Missing auth on the device command endpoint (CWE-306).
+      </p>
+      <Disclosure trigger="Details">
+        <div className="rounded-sm border border-border bg-surface-2 p-2.5 font-mono text-meta text-text-secondary">
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+            <span className="rounded-xs bg-surface-3 px-1.5 py-0.5 text-text">{real.scanner}</span>
+            <span>
+              {real.file}:{real.line}
+            </span>
+            <span className="uppercase">{real.severity}</span>
+            {real.cveRef ? <span className="text-accent-fg">{real.cveRef}</span> : null}
+          </div>
+          <p className="mt-1.5 text-text-secondary">{real.claudeVerdict}</p>
+        </div>
+      </Disclosure>
+    </div>
   );
 }
 
-// --- Panel ---------------------------------------------------------------
+// Heuristics for the inline trust sub-events (no new DB columns).
+function selfCorrectionText(agents: AgentStatus[]): string | null {
+  const a = agents.find((x) => {
+    const t = (x.reasoning || '').toLowerCase();
+    return t.includes('rejected') || t.includes('revis') || t.includes('self-correct');
+  });
+  return a ? 'Revised once — the first fix broke the emergency override.' : null;
+}
 
-export function DashboardPanel({ agents, findings, eventLog, device }: Props) {
-  const selfCorrection = useMemo(() => detectSelfCorrection(agents), [agents]);
-  const guardrailEvent = useMemo(() => detectGuardrailRefusal(eventLog), [eventLog]);
-  const awaiting = useMemo(
-    () => agents.find((a) => a.state === 'waiting_for_human'),
+function guardrailText(eventLog: EventLogRow[]): string | null {
+  const e = eventLog.find((x) => {
+    const t = (x.text || '').toLowerCase();
+    return x.actor === 'guardrail' || t.includes('refused') || t.includes('sandbox refused');
+  });
+  return e ? e.text : null;
+}
+
+// ---------- Panel -----------------------------------------------------------
+
+export function DashboardPanel({
+  device,
+  agents,
+  findings,
+  eventLog,
+  exploitRuns,
+  patchAttempts,
+  live = true,
+}: Props) {
+  const [approved, setApproved] = useState(false);
+
+  // Approving keeps the existing optimistic UI (local `approved` flips the gate
+  // to "Deploying…") AND advances the scripted mock demo director past its
+  // waiting_for_human hold. In live mode requestMockApprove is a no-op.
+  const handleApprove = useCallback(() => {
+    setApproved(true);
+    requestMockApprove();
+  }, []);
+
+  // PURE selector, memoized in render (never in an effect).
+  const entries = useMemo(() => deriveActivity(agents), [agents]);
+
+  // Run origin = earliest non-idle agent timestamp, for the mm:ss elapsed stamps.
+  const origin = useMemo(() => {
+    const ts = agents.filter((a) => a.state !== 'idle').map((a) => a.updatedAt);
+    return ts.length ? Math.min(...ts) : undefined;
+  }, [agents]);
+
+  const done = useMemo(() => agents.filter((a) => a.state === 'done').length, [agents]);
+  const patched = useMemo(
+    () => agents.some((a) => a.stage === 'restore' && a.state === 'done'),
     [agents],
   );
-  const hasPatch = useMemo(
-    () => agents.some((a) => a.stage === 'patch' && a.state !== 'idle'),
-    [agents],
+
+  const selfCorrect = useMemo(() => selfCorrectionText(agents), [agents]);
+  const guardrail = useMemo(() => guardrailText(eventLog), [eventLog]);
+  const diff = patchAttempts[0]?.diffRef || SAMPLE_DIFF;
+
+  const value = useMemo<PipelineValue>(
+    () => ({
+      device,
+      agents,
+      findings,
+      eventLog,
+      exploitRuns,
+      patchAttempts,
+      approved,
+      meta: { deviceLabel: DEVICE_LABEL, fleetSize: FLEET_SIZE, live },
+      actions: { approve: handleApprove },
+    }),
+    [device, agents, findings, eventLog, exploitRuns, patchAttempts, approved, live, handleApprove],
   );
+
+  // Per-stage artifacts injected into the generic feed.
+  function renderExtras(entry: ActivityEntry) {
+    switch (entry.stage) {
+      case 'scan':
+        return <FindingDetails findings={findings} />;
+      case 'deliver':
+        return <RequestCard compromised={device.compromised} />;
+      case 'patch':
+        return (
+          <>
+            {selfCorrect ? <StepSubEvent kind="self-correct" text={selfCorrect} /> : null}
+            {guardrail ? <StepSubEvent kind="guardrail" text={guardrail} /> : null}
+            <CompactDiff diff={diff} />
+            <ApprovalGate
+              show={entry.status === 'needs-approval'}
+              approved={approved}
+              onApprove={handleApprove}
+            />
+          </>
+        );
+      case 'verify':
+        return <Payoff401 />;
+      case 'restore':
+        return <AuditReceipt device={device} />;
+      default:
+        return null;
+    }
+  }
 
   return (
-    <section
-      aria-label="Security pipeline dashboard"
-      className="grid min-h-0 grid-cols-1 gap-6 overflow-y-auto p-5 xl:grid-cols-[38fr_62fr]"
-    >
-      <div className="space-y-4">
-        <AgentTimeline agents={agents} />
+    <PipelineProvider value={value}>
+      <section
+        aria-label="Security pipeline dashboard"
+        className="mx-auto flex h-full min-h-0 w-full max-w-[640px] flex-col"
+      >
+        <HeaderStrip compromised={device.compromised} patched={patched} done={done} live={live} />
 
-        {/* Trust cards: appear only when the moment is real. */}
-        <AnimatePresence>
-          {awaiting ? (
-            <AwaitingApprovalCard key="await" agent={awaiting} />
-          ) : null}
-          {selfCorrection ? (
-            <SelfCorrectionCard key="self" agent={selfCorrection} />
-          ) : null}
-          {guardrailEvent ? (
-            <GuardrailBlockedCard key="guard" event={guardrailEvent} />
-          ) : null}
-        </AnimatePresence>
-      </div>
+        <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4">
+          {entries.length === 0 ? (
+            <p className="text-sm text-text-muted">No active investigation. Monitoring 1 device.</p>
+          ) : (
+            <ActivityFeed entries={entries} origin={origin} renderExtras={renderExtras} />
+          )}
+        </div>
 
-      <div className="space-y-4">
-        <h3 className="text-sm font-semibold uppercase tracking-wider text-muted">
-          Evidence
-        </h3>
-        <TelemetryVsReality device={device} />
-        <FindingsCard findings={findings} />
-        <PatchDiffCard hasPatch={hasPatch} />
-        <ComplianceCard device={device} />
-        <EventLogCard log={eventLog} />
-      </div>
-    </section>
+        <TruthStrip device={device} />
+      </section>
+    </PipelineProvider>
   );
 }
