@@ -63,6 +63,17 @@ spacetime publish --module-path realtime/spacetimedb --server local prevent
 ### SpacetimeDB credit
 Redeem code `CALHACKS13` at https://spacetimedb.com/redeem for 100k TeV (a month of Pro).
 
+## Convex fallback (only if the SpacetimeDB TS loop trips the H13 gate)
+A Convex **cloud dev deployment** is already provisioned so the swap stays "one file":
+```
+VITE_REALTIME_BACKEND=convex           # <- only flip this line
+VITE_CONVEX_URL=https://spotted-kudu-58.convex.cloud
+```
+- **Dashboard:** https://dashboard.convex.dev/t/sanjavan/prevent-dc2b7
+- **Project:** `sanjavan:prevent-dc2b7`, dev deployment `spotted-kudu-58` (US East)
+- **Status:** client adapter in `realtime/src/backend/convex.ts` is wired; **Convex server functions in `realtime/convex/` are NOT written yet** — Dev 3 will build them (schema + per-table queries + per-reducer mutations with `ctx.auth.getUserIdentity()`) **only if we actually need the fallback** (forfeits the SpacetimeDB prize). Until then this stays dormant.
+- No CLI needed by teammates. Owner (Dev 3) runs `npx convex login`, `npx convex deployment create ... --select` for provisioning; teammates just pull.
+
 ### Security loop (Dev 2) — runs headless, offline, with no API keys
 ```bash
 python3.13 -m venv .venv
