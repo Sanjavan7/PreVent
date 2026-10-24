@@ -16,7 +16,7 @@ import {
   type MotionValue,
 } from 'motion/react';
 import { useEffect } from 'react';
-import { EASE_SETTLE } from './motion';
+import { EASE_OUT } from './motion';
 
 interface AnimatedNumberProps {
   value: number;
@@ -55,7 +55,7 @@ export function AnimatedNumber({
     <motion.span
       style={{ display: 'inline-block', color: 'var(--color-danger)', textShadow: '0 0 18px rgba(255,77,79,0.33)' }}
       animate={reduce ? undefined : { x: [0, -2, 2, -1, 1, 0] }}
-      transition={{ duration: 0.35, ease: EASE_SETTLE, repeat: Infinity, repeatDelay: 0.9 }}
+      transition={{ duration: 0.35, ease: EASE_OUT, repeat: Infinity, repeatDelay: 0.9 }}
     >
       {flow}
     </motion.span>
@@ -88,7 +88,7 @@ export function MotionNumber({
       mv.set(value);
       return;
     }
-    const controls = animate(mv, value, { duration: 0.8, ease: EASE_SETTLE });
+    const controls = animate(mv, value, { duration: 0.8, ease: EASE_OUT });
     return () => controls.stop();
   }, [value, mv, reduce]);
 
