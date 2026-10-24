@@ -1,0 +1,27 @@
+{
+  "name": "@prevent/realtime",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "exports": {
+    ".": "./src/index.ts",
+    "./backend": "./src/backend/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "gen": "spacetime generate --lang typescript --out-dir src/module_bindings --module-path spacetimedb",
+    "dev:module": "spacetime publish --module-path spacetimedb --server local prevent",
+    "dev:module:clean": "spacetime publish --module-path spacetimedb --server local --delete-data prevent"
+  },
+  "dependencies": {
+    "@prevent/contracts": "workspace:*",
+    "spacetimedb": "2.13.0",
+    "convex": "1.48.0"
+  },
+  "devDependencies": {
+    "typescript": "7.0.2",
+    "@types/node": "26.6.5"
+  }
+}

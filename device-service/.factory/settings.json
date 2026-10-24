@@ -1,0 +1,40 @@
+{
+  "permissionRules": {
+    "version": 1,
+    "rules": [
+      {
+        "id": "prevent/block-git-push",
+        "decision": "block",
+        "match": { "prefix": ["git", "push"] },
+        "tests": {
+          "match": ["git push origin main", "git push"],
+          "noMatch": ["git status", "git diff"]
+        }
+      },
+      {
+        "id": "prevent/block-sudo",
+        "decision": "block",
+        "match": { "prefix": ["sudo"] },
+        "tests": {
+          "match": ["sudo apt-get update", "sudo rm -rf /"],
+          "noMatch": ["ls"]
+        }
+      },
+      {
+        "id": "prevent/block-git-init",
+        "decision": "block",
+        "match": { "prefix": ["git", "init"] },
+        "tests": {
+          "match": ["git init"],
+          "noMatch": ["git status"]
+        }
+      }
+    ]
+  },
+  "sandbox": {
+    "enabled": true,
+    "network": {
+      "allowedDomains": []
+    }
+  }
+}

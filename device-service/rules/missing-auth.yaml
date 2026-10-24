@@ -1,0 +1,66 @@
+# Custom CWE-306 rule — no stock SemGrep rule covers "Flask route handler with
+# no auth decorator". Written WITH device-service/app.py: must fire on
+# handle_device_command_vulnerable (registered on POST /device/command,
+# no auth decorator / Depends) and stay silent on handle_device_command_patched
+# (gated by a bearer-token check before touching state).
+#
+# TODO(dev): validate with `semgrep scan --config rules/ --validate` and add
+# `semgrep --test` fixtures using `# ruleid: flask-missing-auth-decorator` /
+# `# ok: flask-missing-auth-decorator` comments once semgrep is installed
+# (plan pins semgrep==1.182.1 under Python 3.10-3.14, NOT 3.15).
+#
+# Run: semgrep scan --config rules/ --json --metrics off --disable-version-check \
+#      --quiet device-service > semgrep.json
+
+rules:
+  - id: flask-missing-auth-decorator
+    languages: [python]
+    severity: ERROR
+    message: >-
+      Flask route handler is registered with no authentication/authorization
+      decorator (e.g. @login_required, a custom @require_auth(...), or a
+      FastAPI Depends(...) auth dependency). An unauthenticated caller can
+      invoke this handler directly. CWE-306: Missing Authentication for
+      Critical Function.
+    metadata:
+      cwe: CWE-306
+      owasp:
+        - "A07:2021 - Identification and Authentication Failures"
+      references:
+        - https://cwe.mitre.org/data/definitions/306.html
+      category: security
+      confidence: HIGH
+      technology:
+        - flask
+        - fastapi
+      author: "Dev 2 (security-verification) — PreVent, Cal Hacks 13.0"
+    patterns:
+      - pattern: |
+          @$APP.$METHOD(...)
+          def $FUNC(...):
+              ...
+      - metavariable-regex:
+          metavariable: $METHOD
+          regex: ^(get|post|put|patch|delete|route)$
+      # Decorator-based auth guards (Flask / Flask-Login / custom decorators).
+      - pattern-not: |
+          @$APP.$METHOD(...)
+          @login_required
+          def $FUNC(...):
+              ...
+      - pattern-not: |
+          @$APP.$METHOD(...)
+          @$AUTH(...)
+          def $FUNC(...):
+              ...
+      # FastAPI-style dependency-injected auth (Depends(...) as a function arg).
+      - pattern-not: |
+          @$APP.$METHOD(...)
+          def $FUNC(..., $PARAM = Depends(...), ...):
+              ...
+      # In-body auth checks are out of scope for this rule on purpose: the
+      # vulnerable handler in app.py does the opposite (no check at all), and
+      # the patched reference handler is gated purely by the Depends/decorator
+      # shape above in the intended "real" fix. If a future handler guards via
+      # an in-body token check instead of a decorator, extend this rule rather
+      # than relying on this comment.

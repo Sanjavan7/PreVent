@@ -1,0 +1,50 @@
+@import "tailwindcss";
+
+@theme {
+  --color-bg: #0b0f14;
+  --color-surface: #111821;
+  --color-surface-2: #17212c;
+  --color-border: #1f2b38;
+  --color-text: #e6edf3;
+  --color-muted: #8b9aab;
+  --color-accent: #38bdf8;
+  --color-ok: #22c55e;
+  --color-warn: #f59e0b;
+  --color-danger: #ef4444;
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+  --ease-prevent: cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--color-bg);
+  color: var(--color-text);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* One ~450ms ease for all meaningful motion. */
+.prevent-transition {
+  transition: all 450ms var(--ease-prevent);
+}
+
+@keyframes prevent-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
+}
+
+.pulse {
+  animation: prevent-pulse 1.1s var(--ease-prevent) infinite;
+}

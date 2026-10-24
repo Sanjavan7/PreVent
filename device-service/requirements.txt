@@ -1,0 +1,4 @@
+# Pinned per plans/PLAN-DEV2-security-verification.md verified-pins section.
+# TODO(dev): re-verify these resolve on the demo laptop before H0 (pip index may have newer patch releases).
+flask==3.1.0
+requests==2.32.3

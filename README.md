@@ -1,61 +1,45 @@
-# Hospital Device Security Agents _(working title)_
+# PreVent — Autonomous Medical-Device Security Pipeline
 
-**Cal Hacks 13.0 · Oct 23–25, 2026**
-Team: Israel Ogwu · Christian Ibarbia Ruiz · Saketh Poori · Sanjavan Ghodasara
+**Cal Hacks 13.0.** A pipeline of AI agents that finds a security vulnerability in a medical device's software, **proves it by exploiting it in a sandbox**, writes and **verifies** a fix, and restores the device — every step visible, with a human approving before anything is final. Demonstrated live on a harmless Arduino-driven "ventilator" + patient prop, on a split screen where the judge is the patient.
 
-> **One-liner:** A multi-agent system that helps hospitals find weaknesses in medical-device software, confirm them safely in a sandbox, apply a fix, and bring the device back online, with a human approving every step.
+> **Honest framing (we hold this throughout).** This is a **pre-market / staging** tool — it never auto-patches live clinical devices. The hardware is a **desk fan that models a missing-authentication vulnerability class** (CWE-306), not a real ventilator. We model the *class* of the real advisory **CVE-2019-6538** (Medtronic Conexus), which is adjacent-radio, not a remote hack. Prevalence figures are industry **estimates**; there is **no confirmed patient death from a device hack** (documented deaths come from ransomware disrupting care). The enabling regulation is **FDA section 524B**.
 
----
+## The loop
+`GROUND` a real CVE → `SCAN` the device code (SemGrep + Bandit; Claude reasons which finding is real) → `GENERATE` an exploit (Bitdeer open model) → `DELIVER` it (a judge presses an IR remote; the device obeys an **unauthenticated** command — the fan stops while the device keeps reporting normal vitals and never alarms, i.e. it **lies**) → `PATCH` (Factory Droid writes the fix) → **HUMAN GATE** → `VERIFY` (re-run the exact exploit; it now returns 401) → `RESTORE`.
 
-## The idea
-Hospitals run thousands of connected devices, and many run old, rarely patched software. When something goes wrong, the hard parts are knowing **what's weak**, **whether it really matters**, and **how to fix it without taking care offline**.
+One shared `device_status` row drives **the physical hardware, the left patient sim, and the right "no black box" dashboard** — nothing can drift or be faked.
 
-Our agents work as a pipeline on a **simulated medical device** we build ourselves:
+## How each sponsor tech is used
+- **Claude (Anthropic) — Agent SDK:** the reasoning core. Scan triage, outcome judging, verification triage, with **visible streamed reasoning, stated uncertainty, and a real safety refusal** on the dashboard.
+- **Factory Droid (`@factory/droid-sdk`):** the autonomous **patch engineer** — triggered by the orchestrator (not a human) on the confirmed vuln, it edits the device-service repo and streams its **plan + real diff** to the dashboard, scoped so it cannot commit/push/deploy, gated by a human click.
+- **SpacetimeDB:** the real-time backbone — one reactive DB (tables + reducers + subscriptions) that the device service, both panels, and the serial bridge subscribe to; separation of duties is enforced in reducers via `ctx.sender`. (**Convex** is the warm fallback behind a `RealtimeBackend` abstraction.)
+- **Bitdeer AI Model Studio:** hosts the open model (`deepseek-ai/DeepSeek-V4.1-Flash`) that writes the proof-of-concept exploit — isolating the offensive-code model from the trust/decision model (a real separation of duties).
+- **NVD/CVE:** grounds the vulnerability in a real published advisory.
 
-| Step | What happens |
-|---|---|
-| **1. Scan** | An agent reviews the device's software with static analysis tools and AI review to flag weaknesses |
-| **2. Validate (sandbox only)** | An agent confirms whether each finding is real, inside an isolated container, never on live equipment |
-| **3. Fix** | An agent proposes a patch or mitigation; a human approves it |
-| **4. Restore** | The device is redeployed and verified, back online |
-| **5. Report** | A plain-English report for hospital IT and clinical engineering |
+## What's real vs simulated
+- **Real:** the agent pipeline (find → exploit → patch → verify), the Factory Droid diff, the SemGrep finding, the deterministic verifier, the Arduino actuation driven by live state, the judge-chosen IR payload.
+- **Simulated / visualized:** the hospital "fleet of ~3,412 devices" (a scale visualization — only one real device is in the loop) and the patient (the judge).
 
-Possible hardware angle: a Raspberry Pi or Arduino "mock device" on the table, so judges can watch it go down and come back up.
-
-## Ground rules (non-negotiable)
-- **Simulated devices only.** We build the vulnerable target ourselves. No real hospital equipment, no third-party systems.
-- **Isolated environment.** Everything runs in local containers on our own machines.
-- **Human in the loop.** No fix is applied without explicit approval.
-- **Audit log** of every agent action.
-- All code written during the event (Cal Hacks rule).
-
-## Sponsor tracks we're targeting
-| Track | Prize | Why we fit |
+## Repo layout
+| Dir | Owner | What |
 |---|---|---|
-| **Armadin: Best Security Hack** | ~$996 | Core security product: find, confirm, fix, restore. **Primary target** |
-| **Cal Hacks: People-First Social Impact** | Apple Watch each | Protects hospitals and patients |
-| **Cal Hacks: Most Technically Advanced** | NuPhy keyboard each | A multi-agent pipeline + sandboxing + hardware |
-| **Cal Hacks: Best Hardware Hack** | Bambu 3D printer each | Only if we build the physical mock device |
-| **Factory: Best Use of the Droid SDK** | $2,000 | The **fix agent** that writes patches is a natural fit for coding agents |
-| **Microsoft: Built for the Real World** | $3,800 + Surface each | A real hospital problem. *Ask whether Azure is required* |
-| **Anthropic** (presenting sponsor) | No listed prize | Claude powers the agents. *Ask about an unlisted track* |
-| **Elastic: Agent Builder on Serverless** | ~$1.2K / ~$1.4K | *Maybe:* an agent that searches findings and audit logs |
-| **Fetch.ai** | $1.5K / $1K / $500 | *Maybe:* the agents could run on Agentverse |
-| **MLH Commit Fellowship** + **GoDaddy domain** | Interview / gift card | Easy add-ons at submission |
+| `contracts/` | shared | Frozen types, serial-schema constant, model IDs, mock fixtures — **import, don't redefine** |
+| `agents/` | Dev 1 | Orchestrator, Agent SDK runner, human gate, Factory Droid patch stage |
+| `device-service/` · `security/` | Dev 2 | Vulnerable+patched service, SemGrep/Bandit, Bitdeer exploit, verifier, NVD |
+| `realtime/` · `app/` | Dev 3 | SpacetimeDB module + abstraction, dashboard, 2D sim |
+| `firmware/` · `serial-bridge/` · `emulator/` | Hardware | UNO firmware, serial bridge, software emulator |
 
-**Ask the directors (#0-ask-directors):** how many tracks can one project enter?
+Per-person task plans are in **`plans/`** (`PLAN-FOUNDATION.md`, `PLAN-DEV1…`, `PLAN-DEV2…`, `PLAN-DEV3…`, `PLAN-HW-arduino.md`).
 
-## Working in this repo
-- `main` is the shared, always-working branch. **Don't push half-finished work straight to `main`.**
-- Create your own branch for each piece of work:
-  ```
-  git checkout main && git pull
-  git checkout -b <your-name>/<feature>     # e.g. israel/sandbox, saketh/mock-device
-  ```
-- Push your branch and open a **pull request** into `main`; someone else gives it a quick look before merging.
-- **Never commit secrets** (API keys go in `.env`, which git ignores).
+## Setup
+```bash
+# prerequisites: Node >=22.12, pnpm, Python 3.11-3.13 (for device-service/security), Arduino IDE 2.x
+cp .env.example .env            # fill in keys
+pnpm install
+pnpm -r typecheck
+# SpacetimeDB (Windows): irm https://windows.spacetimedb.com -useb | iex ; then: spacetime install 2.13.0
+# redeem free Maincloud credits: spacetimedb.com/redeem  code: CALHACKS13
+```
 
-## Key deadlines (PDT)
-- **Sat 11 PM:** feature freeze + backup demo video
-- **Sun 8:30 AM:** submit on Devpost (hard deadline 9:00 AM)
-- **Before submitting:** make this repo public so judges can open it
+## Team workflow
+Shared `main` is the integration branch. Each dev works on a branch (`dev1/…`, `dev2/…`, `dev3/…`, `hw/…`) and opens a PR into `main`. **All code is written during the event.**

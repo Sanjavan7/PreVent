@@ -1,0 +1,30 @@
+{
+  "name": "@prevent/app",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@prevent/contracts": "workspace:*",
+    "@tailwindcss/vite": "4.3.3",
+    "motion": "14.6.0",
+    "pixi.js": "8.22.0",
+    "react": "19.3.1",
+    "react-diff-view": "3.3.3",
+    "react-dom": "19.3.1",
+    "shiki": "4.5.0",
+    "tailwindcss": "4.3.3"
+  },
+  "devDependencies": {
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "@vitejs/plugin-react": "6.1.2",
+    "typescript": "7.0.2",
+    "vite": "8.3.5"
+  }
+}

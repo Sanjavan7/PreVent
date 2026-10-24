@@ -1,0 +1,7 @@
+packages:
+  - contracts
+  - realtime
+  - agents
+  - serial-bridge
+  - emulator
+  - app
