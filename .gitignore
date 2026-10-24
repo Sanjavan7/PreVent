@@ -18,9 +18,16 @@ venv/
 .ruff_cache/
 
 # spacetimedb generated + local
+# NOTE: realtime/src/module_bindings/ is COMMITTED (team shares it, saves CLI setup)
 **/module_bindings/
+!realtime/src/module_bindings/
 .spacetime/
 target/
+
+# Claude Code / per-dev agent installs (not shared)
+.claude/
+.agents/
+skills-lock.json
 
 # demo artifacts
 /recordings/
