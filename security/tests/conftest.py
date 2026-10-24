@@ -22,6 +22,15 @@ sys.path.insert(0, str(SECURITY_DIR))
 from loop import DeviceService  # noqa: E402
 
 
+@pytest.fixture(autouse=True)
+def _offline_generate(monkeypatch):
+    """Keep the whole suite hermetic: strip the GENERATE provider keys so no
+    test hits a live model (cached PoC path) even if someone sourced .env.
+    A test that wants the live path can re-set a key itself."""
+    for var in ("FEATHERLESS_API_KEY", "BITDEER_API_KEY"):
+        monkeypatch.delenv(var, raising=False)
+
+
 def free_port() -> int:
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
         s.bind(("127.0.0.1", 0))

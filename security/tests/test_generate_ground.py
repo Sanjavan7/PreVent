@@ -15,6 +15,7 @@ def test_payloads_map_the_three_ir_choices():
 
 def test_generate_falls_back_to_cache_without_key(monkeypatch):
     monkeypatch.delenv("BITDEER_API_KEY", raising=False)
+    monkeypatch.delenv("FEATHERLESS_API_KEY", raising=False)
     finding = {"scanner": "semgrep", "cveRef": "CVE-2019-6538", "file": "device-service/app.py", "line": 1}
     poc = generate_poc("stop-breathing", finding)
     assert poc["source"] == "pre_cached_fallback"
