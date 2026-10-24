@@ -24,7 +24,7 @@
 
 import { useRef } from 'react';
 import { useFrame } from '@react-three/fiber';
-import type { MeshStandardMaterial } from 'three';
+import type { Color, MeshStandardMaterial } from 'three';
 import { easing } from 'maath';
 import type { DeviceStatus } from '@prevent/contracts';
 import {
@@ -98,34 +98,53 @@ export function DeviceDriver({ getDevice, refs, reducedMotion }: Props) {
     const d = getDevice();
     const v = visualState(d, Date.now());
 
+    // Publish the live crash signal for CameraRig's crash dolly-in (ref, not
+    // state -- the attack must not reconcile the scene subtree).
+    refs.crashed.current = v.crashed;
+
+    // Under reduced motion the Canvas is frameloop="demand": a device change
+    // invalidates ONE frame, so easing.damp/dampC would advance only a fraction
+    // and freeze the crash visuals half-transitioned. Snap straight to the target
+    // instead (like CameraRig's reduced-motion path) so that single frame lands
+    // the full crash/restore state. Normal motion still eases.
+    const dampN = <T,>(obj: T, key: keyof T, target: number, smooth: number) => {
+      if (reducedMotion) (obj as Record<string, number>)[key as string] = target;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      else easing.damp(obj as any, key as any, target, smooth, dt);
+    };
+    const dampCol = (color: Color, target: number, smooth: number) => {
+      if (reducedMotion) color.set(target);
+      else easing.dampC(color, target, smooth, dt);
+    };
+
     // Slow 0.8 Hz breath (flat at its mean under reduced motion). Never a strobe.
     const pulse = reducedMotion ? 0.5 : 0.5 + 0.5 * Math.sin(t * TWO_PI * PULSE_HZ);
 
-    // ---- damp the warm-local axes (all eased; nothing snaps) ----------------
-    easing.damp(env.current, 'alert', v.alertLevel, 0.5, dt);
-    easing.damp(env.current, 'focus', v.focusOn ? 1 : 0, 0.6, dt);
-    easing.damp(env.current, 'dim', v.restDim, 0.6, dt);
-    easing.damp(env.current, 'emissive', v.emissive, 0.35, dt);
-    easing.damp(env.current, 'code', v.codeOpacity, 0.3, dt);
+    // ---- damp the warm-local axes (eased live; snapped under reduced motion) -
+    dampN(env.current, 'alert', v.alertLevel, 0.5);
+    dampN(env.current, 'focus', v.focusOn ? 1 : 0, 0.6);
+    dampN(env.current, 'dim', v.restDim, 0.6);
+    dampN(env.current, 'emissive', v.emissive, 0.35);
+    dampN(env.current, 'code', v.codeOpacity, 0.3);
     const alert = env.current.alert;
     const focus = env.current.focus;
 
     // ---- judge-room focal materials: warm blue -> coral, breathe on alert ---
     const cove = refs.roomCove.current;
     if (cove) {
-      easing.dampC(cove.emissive, v.coveColor, 0.5, dt);
+      dampCol(cove.emissive, v.coveColor, 0.5);
       cove.emissiveIntensity = lerp(0.3, 0.7 + 0.5 * pulse, alert);
     }
     const ring = refs.focusRing.current;
     if (ring) {
-      easing.dampC(ring.color, v.ringColor, 0.5, dt);
-      easing.dampC(ring.emissive, v.ringColor, 0.5, dt);
+      dampCol(ring.color, v.ringColor, 0.5);
+      dampCol(ring.emissive, v.ringColor, 0.5);
       // Always-on gentle halo; brightens + pulses as the room warms.
       ring.opacity = 0.35 + focus * (0.25 + 0.3 * pulse);
       ring.emissiveIntensity = lerp(0.9, 1.4, alert);
     }
     if (refs.inlayMat.current) {
-      easing.dampC(refs.inlayMat.current.color, v.inlayColor, 0.5, dt);
+      dampCol(refs.inlayMat.current.color, v.inlayColor, 0.5);
     }
 
     // ---- the rest of the ward RECEDES ~12% (never dark); judge spot rises ----
@@ -148,7 +167,7 @@ export function DeviceDriver({ getDevice, refs, reducedMotion }: Props) {
     // ---- ventilator status LED (mint -> coral; subtle pulse on alert) --------
     if (refs.led.current) {
       const mat = refs.led.current.material as MeshStandardMaterial;
-      easing.dampC(mat.emissive, v.ledColor, 0.3, dt);
+      dampCol(mat.emissive, v.ledColor, 0.3);
       mat.emissiveIntensity = LED_BASE_INTENSITY + (v.compromised ? 0.6 : 0) + alert * pulse * 0.8;
     }
 
@@ -167,8 +186,8 @@ export function DeviceDriver({ getDevice, refs, reducedMotion }: Props) {
         targetScaleY = 0.6;
         targetPosY = BELLOWS_BASE_Y - 0.05;
       }
-      easing.damp(bellows.scale, 'y', targetScaleY, 0.18, dt);
-      easing.damp(bellows.position, 'y', targetPosY, 0.18, dt);
+      dampN(bellows.scale, 'y', targetScaleY, 0.18);
+      dampN(bellows.position, 'y', targetPosY, 0.18);
     }
 
     // ---- judge patient chest: a CLEARLY visible breath, synced to the bellows.
@@ -192,8 +211,8 @@ export function DeviceDriver({ getDevice, refs, reducedMotion }: Props) {
           targetPosY = BREATH_BASE_Y + stroke * BREATH_RISE;
         }
       }
-      easing.damp(breathing.scale, 'y', targetScaleY, 0.16, dt);
-      easing.damp(breathing.position, 'y', targetPosY, 0.18, dt);
+      dampN(breathing.scale, 'y', targetScaleY, 0.16);
+      dampN(breathing.position, 'y', targetPosY, 0.18);
     }
 
     // ---- IV drip (cosmetic sawtooth) ----------------------------------------
@@ -227,6 +246,18 @@ export function DeviceDriver({ getDevice, refs, reducedMotion }: Props) {
         el.style.color = STATUS_RED;
         el.style.borderColor = STATUS_RED_BORDER;
         el.style.boxShadow = '0 4px 20px rgba(239,68,68,0.34)';
+      }
+      // Punctuate the money instant: a one-shot scale pop on the rising edge of a
+      // real flip (either direction), NOT on the initial mount (lastAlive null).
+      // The chip has no base transform (its parent <Html center> owns the
+      // centering), so we pop pure scale about its default center origin. WAAPI
+      // fill defaults to none, so it settles back to the untransformed base.
+      // Skipped under reduced motion.
+      if (!reducedMotion && lastAlive.current !== null) {
+        el.animate(
+          [{ transform: 'scale(1.14)' }, { transform: 'scale(1)' }],
+          { duration: 420, easing: 'ease-out' },
+        );
       }
       lastAlive.current = v.alive;
     }

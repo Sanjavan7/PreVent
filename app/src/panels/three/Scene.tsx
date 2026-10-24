@@ -154,6 +154,8 @@ export const Scene = memo(function Scene({ getDevice, reducedMotion }: Props) {
         controlsRef={refs.controls}
         selectedId={selectedId}
         reducedMotion={reducedMotion}
+        crashedRef={refs.crashed}
+        interactingRef={refs.interacting}
       />
     </>
   );

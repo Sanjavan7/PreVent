@@ -80,6 +80,10 @@ export interface SceneRefs {
   controls: RefObject<OrbitControlsHandle | null>;
   /** True while the viewer is actively dragging (pauses auto-orbit). */
   interacting: RefObject<boolean>;
+  /** Live physical-crash signal, written each frame by DeviceDriver and read by
+   *  CameraRig to dolly IN on the judge room during the attack. A ref (not a
+   *  prop) so the crash never reconciles the scene subtree. */
+  crashed: RefObject<boolean>;
 }
 
 /** Create the stable ref bundle. Call once, in <Scene>. */
@@ -104,5 +108,6 @@ export function useSceneRefs(): SceneRefs {
     people: useRef<InstancedMesh | null>(null),
     controls: useRef<OrbitControlsHandle | null>(null),
     interacting: useRef<boolean>(false),
+    crashed: useRef<boolean>(false),
   };
 }

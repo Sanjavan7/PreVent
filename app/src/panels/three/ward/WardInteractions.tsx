@@ -216,6 +216,10 @@ export const WardInteractions = memo(function WardInteractions({
   const selectedRoom = selectedId
     ? ROOM_LAYOUT.rooms.find((r) => r.id === selectedId) ?? null
     : null;
+  // The judge's room (202) is where the viewer physically is: "You are here" is
+  // anchored to it ALWAYS, independent of click selection. Clicking another room
+  // drives only the camera glide (CameraRig) + that room's focus label below.
+  const judgeRoom = ROOM_LAYOUT.rooms.find((r) => r.judge) ?? null;
 
   return (
     <group>
@@ -269,15 +273,12 @@ export const WardInteractions = memo(function WardInteractions({
         );
       })}
 
-      {/* The floating "you are here" arrow over the selected room (default = the
-          judge room 202, so it shows on load). The camera glide to it lives in
-          CameraRig; re-keyed per selection so its chip re-animates in. */}
-      {selectedRoom && (
-        <ArrowMarker
-          key={selectedRoom.id}
-          center={selectedRoom.center}
-          reducedMotion={reducedMotion}
-        />
+      {/* The floating "You are here" arrow is ANCHORED to the judge's room (202)
+          and renders there regardless of selection, so clicking another room can
+          never move "You are here" off the patient. Click-to-focus drives only
+          the camera glide (CameraRig) and the non-judge focus label below. */}
+      {judgeRoom && (
+        <ArrowMarker center={judgeRoom.center} reducedMotion={reducedMotion} />
       )}
 
       {/* Room-identity label for the selected NON-judge room (crisp DOM;

@@ -13,7 +13,7 @@
 // the 3D "you are here" arrow) in parallel; this page only mounts ICUScene3D —
 // it never edits three/.
 
-import { Suspense, lazy } from 'react';
+import { Suspense, lazy, useState } from 'react';
 import { PatientMonitor } from '../panels/pixi/PatientMonitor';
 import { ErrorBoundary } from '../panels/three/ErrorBoundary';
 import { useRealtime } from '../realtime/useRealtime';
@@ -27,9 +27,16 @@ const ICUScene3D = lazy(() => import('../panels/three/ICUScene3D'));
 
 export function HospitalSim() {
   const rt = useRealtime();
+  // First pointer-down on the ward dismisses the "click a room" hint. The focus
+  // selection itself lives inside the Canvas scene; this is the page-level signal
+  // that the viewer has started interacting, which is all the hint needs.
+  const [interacted, setInteracted] = useState(false);
 
   return (
-    <div className="relative flex h-full w-full flex-col overflow-hidden bg-bg">
+    <div
+      className="relative flex h-full w-full flex-col overflow-hidden bg-bg"
+      onPointerDown={() => setInteracted(true)}
+    >
       {/* Full-bleed bright ward. ICUScene3D owns its WebGL guard, internal
           ErrorBoundary and asset Suspense, and fills the flex-1 slot. The outer
           ErrorBoundary + Suspense (defense in depth, matching SimPanel) cover
@@ -45,9 +52,21 @@ export function HospitalSim() {
         </Suspense>
       </ErrorBoundary>
 
-      {/* "You are here" corner label — the only standing chrome. */}
-      <div className="pointer-events-none absolute left-4 top-4 rounded-sm border border-border/60 bg-surface-2/80 px-3 py-1.5 text-meta text-text-secondary backdrop-blur-sm">
-        Patient Ward · Room 202 · <span className="text-text">You</span>
+      {/* "You are here" corner chrome — the only standing labels: the locator,
+          a source caption (mock/live), and a one-time "click a room" hint that
+          fades after the first interaction. */}
+      <div className="pointer-events-none absolute left-4 top-4 flex flex-col gap-1.5">
+        <div className="rounded-sm border border-border/60 bg-surface-2/80 px-3 py-1.5 text-meta text-text-secondary backdrop-blur-sm">
+          Patient Ward · Room 202 · <span className="text-text">You</span>
+          <span className="ml-2 text-text-muted">source: {rt.mode}</span>
+        </div>
+        <div
+          className={`self-start rounded-sm px-3 py-1 text-meta text-text-muted transition-opacity duration-500 ${
+            interacted ? 'opacity-0' : 'opacity-100'
+          }`}
+        >
+          Click a room to focus
+        </div>
       </div>
 
       {/* Mock-only standalone control: this page can drive its own pipeline. */}
@@ -55,7 +74,7 @@ export function HospitalSim() {
         <button
           type="button"
           onClick={() => rt.setMockExploited(!rt.mockExploited)}
-          className="state-transition absolute right-4 top-4 rounded-sm border border-accent-border bg-accent-bg px-3 py-1 text-meta text-accent-fg hover:bg-surface-3"
+          className="state-transition absolute right-4 top-4 rounded-sm bg-accent px-3 py-1 text-meta font-medium text-white hover:bg-accent-hover"
         >
           {rt.mockExploited ? 'Reset to healthy' : 'Simulate exploit'}
         </button>
