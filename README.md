@@ -34,12 +34,34 @@ Per-person task plans are in **`plans/`** (`PLAN-FOUNDATION.md`, `PLAN-DEV1…`,
 ## Setup
 ```bash
 # prerequisites: Node >=22.12, pnpm, Python 3.11-3.13 (for device-service/security), Arduino IDE 2.x
-cp .env.example .env            # fill in keys
+cp .env.example .env            # fill in keys (all OPTIONAL for the security loop — see below)
 pnpm install
 pnpm -r typecheck
 # SpacetimeDB (Windows): irm https://windows.spacetimedb.com -useb | iex ; then: spacetime install 2.13.0
 # redeem free Maincloud credits: spacetimedb.com/redeem  code: CALHACKS13
 ```
+
+### Security loop (Dev 2) — runs headless, offline, with no API keys
+```bash
+python3.13 -m venv .venv
+./.venv/bin/python -m pip install -r security/requirements.txt -r security/requirements-dev.txt
+uv tool install --python 3.13 semgrep==1.182.1    # SemGrep + Bandit are standalone tools
+uv tool install --python 3.13 bandit==1.9.4
+
+./.venv/bin/python security/loop.py               # GROUND→SCAN→GENERATE→DELIVER→PATCH→VERIFY→RESTORE
+./.venv/bin/python -m pytest security/tests        # 24 tests (~16s)
+```
+The device-service listens on **port 8071** (not 5000 — on macOS, AirPlay owns
+:5000 and answers 403, which would fake a VERIFY pass). Full guide:
+[`security/README.md`](security/README.md); design rationale + integration
+seams: [`docs/DEV2-SECURITY-DECISIONS.md`](docs/DEV2-SECURITY-DECISIONS.md).
+
+**Keys are optional.** The loop uses a cached PoC and deterministic triage when
+unset. Set `FEATHERLESS_API_KEY` for live PoC generation (primary provider;
+`BITDEER_API_KEY` is the fallback — both serve `DeepSeek-V4.1-Flash-1017`),
+`ANTHROPIC_API_KEY` for live Claude triage narration (via Dev 1), `NVD_API_KEY`
+for a higher NVD rate limit (the CVE JSON is already cached). `FACTORY_API_KEY`
+is used by Dev 1's Droid patch stage, not the Dev 2 loop.
 
 ## Team workflow
 Shared `main` is the integration branch. Each dev works on a branch (`dev1/…`, `dev2/…`, `dev3/…`, `hw/…`) and opens a PR into `main`. **All code is written during the event.**

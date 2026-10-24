@@ -39,7 +39,18 @@ REPO_ROOT = SECURITY_DIR.parent
 DEVICE_SERVICE_DIR = REPO_ROOT / "device-service"
 SEMGREP_RULES_DIR = DEVICE_SERVICE_DIR / "rules"
 
-DEVICE_SERVICE_URL = __import__("os").environ.get("DEVICE_SERVICE_URL", "http://localhost:5000")
+DEVICE_SERVICE_URL = __import__("os").environ.get("DEVICE_SERVICE_URL", "http://127.0.0.1:8071")
+
+
+def _rel(p: str) -> str:
+    """Make a scanner-reported path repo-root-relative (e.g. device-service/app.py)
+    so recorded Finding.file values are stable and readable, not absolute."""
+    if not p:
+        return p
+    try:
+        return str(Path(p).resolve().relative_to(REPO_ROOT))
+    except ValueError:
+        return p
 
 
 class ScannerFinding(TypedDict):
@@ -49,8 +60,10 @@ class ScannerFinding(TypedDict):
     file: str
     line: int
     severity: str
-    claudeVerdict: str  # filled by the Claude triage stage, empty here
-    isTheRealOne: bool  # filled by the Claude triage stage, False here
+    ruleId: str  # semgrep check_id / bandit test_id (B105, B324, ...) — triage context
+    message: str  # the scanner's own one-line description — triage context
+    claudeVerdict: str  # filled by the triage stage, empty here
+    isTheRealOne: bool  # filled by the triage stage, False here
     createdAt: int
 
 
@@ -104,14 +117,17 @@ def run_semgrep(device_service_dir: Path = DEVICE_SERVICE_DIR, rules_dir: Path =
 
     findings: list[ScannerFinding] = []
     for i, r in enumerate(result.get("results", [])):
+        extra = r.get("extra", {})
         findings.append(
             {
                 "id": i + 1,
                 "scanner": "semgrep",
                 "cveRef": "CVE-2019-6538",
-                "file": r.get("path", ""),
+                "file": _rel(r.get("path", "")),
                 "line": int(r.get("start", {}).get("line", 0)),
-                "severity": str(r.get("extra", {}).get("severity", "")).upper() or "ERROR",
+                "severity": str(extra.get("severity", "")).upper() or "ERROR",
+                "ruleId": str(r.get("check_id", "")).split(".")[-1],
+                "message": " ".join(str(extra.get("message", "")).split())[:200],
                 "claudeVerdict": "",
                 "isTheRealOne": False,
                 "createdAt": int(time.time() * 1000),
@@ -139,9 +155,11 @@ def run_bandit(device_service_dir: Path = DEVICE_SERVICE_DIR) -> list[ScannerFin
                 "id": i + 1,
                 "scanner": "bandit",
                 "cveRef": "",
-                "file": r.get("filename", ""),
+                "file": _rel(r.get("filename", "")),
                 "line": int(r.get("line_number", 0)),
                 "severity": str(r.get("issue_severity", "")).upper() or "LOW",
+                "ruleId": str(r.get("test_id", "")),
+                "message": " ".join(str(r.get("issue_text", "")).split())[:200],
                 "claudeVerdict": "",
                 "isTheRealOne": False,
                 "createdAt": int(time.time() * 1000),
@@ -160,46 +178,104 @@ def run_scanners(device_service_dir: Path = DEVICE_SERVICE_DIR, rules_dir: Path 
 class ProbeResult(TypedDict):
     reproduced: bool
     detail: str
+    live: bool  # True if an actual HTTP probe ran; False = offline/deterministic
+
+
+def _live_missing_auth_probe(base_url: str) -> ProbeResult | None:
+    """Fire a NON-DESTRUCTIVE unauthenticated command at POST /device/command
+    and decide whether missing-auth reproduces. We send `{"action":"resume"}`
+    (idempotent — keeps the fan on / vitals healthy) deliberately: SCAN must
+    prove the handler accepts unauthenticated mutating commands WITHOUT crashing
+    the patient (that dramatic beat belongs to DELIVER, on the judge's press).
+
+      - 200  -> an unauthenticated caller successfully issued a device command
+                => missing auth reproduces (the vuln is real).
+      - 401/403 -> the handler is guarded (patched) => does NOT reproduce.
+
+    Returns None if device-service is unreachable, so the caller can fall back
+    to the deterministic offline verdict and SCAN never blocks.
+    """
+    try:
+        import requests  # local import: SCAN works even if requests is absent offline
+
+        resp = requests.post(
+            f"{base_url}/device/command",
+            json={"action": "resume"},  # harmless, restores healthy
+            timeout=3.0,
+        )
+    except Exception as exc:  # noqa: BLE001 - unreachable device -> offline fallback
+        print(f"[reproduce_probe] {base_url} unreachable ({exc}); using offline verdict", file=sys.stderr)
+        return None
+
+    if resp.status_code in (401, 403):
+        return {
+            "reproduced": False,
+            "live": True,
+            "detail": (
+                f"Unauthenticated POST /device/command returned {resp.status_code} — "
+                "the handler enforces auth, so missing-auth does NOT reproduce (patched)."
+            ),
+        }
+    if 200 <= resp.status_code < 300:
+        return {
+            "reproduced": True,
+            "live": True,
+            "detail": (
+                f"Unauthenticated POST /device/command returned {resp.status_code} with no "
+                "Authorization header — an unauthenticated caller issued a device command. "
+                "CWE-306 missing authentication confirmed (probed non-destructively with action=resume)."
+            ),
+        }
+    return {
+        "reproduced": False,
+        "live": True,
+        "detail": f"Unauthenticated POST /device/command returned an unexpected {resp.status_code}.",
+    }
 
 
 def reproduce_probe(finding: ScannerFinding, *, base_url: str = DEVICE_SERVICE_URL) -> ProbeResult:
-    """Deterministic (non-AI) reproduction check — the "wrong-then-caught"
-    beat. The triage prompt (triage_prompt.py) instructs Claude to call this
-    on its first candidate before committing to it.
+    """The deterministic (non-AI) "reproduce-the-finding" check — the
+    wrong-then-caught beat. The triage logic (triage.py) and the triage prompt
+    (triage_prompt.py) both call this on a candidate BEFORE committing to it.
 
-    Bandit's picks are generic static-analysis noise (hardcoded strings,
-    SQL-string warnings, etc.) that are not themselves a working exploit
-    against this device — this probe deterministically returns
-    `reproduced=False` for any Bandit finding, which is the designed
-    contradiction that makes Claude self-correct onto the real SemGrep
-    CWE-306 finding (the only one with cveRef == "CVE-2019-6538").
+    Bandit's picks are generic static-analysis smells (hardcoded strings, weak
+    hashes, broad excepts) that are not themselves a working unauthenticated
+    exploit against this device, so they deterministically do NOT reproduce —
+    the designed contradiction that makes triage self-correct onto the SemGrep
+    CWE-306 finding.
+
+    For the SemGrep CWE-306 finding we try a LIVE non-destructive probe against
+    a running device-service; offline we fall back to the static verdict so
+    SCAN is runnable before the service is up.
     """
     if finding["scanner"] == "bandit":
         return {
             "reproduced": False,
+            "live": False,
             "detail": (
-                f"Bandit finding at {finding['file']}:{finding['line']} "
-                "(severity-of-style issue) does not correspond to a working "
-                "unauthenticated exploit against POST /device/command — "
+                f"Bandit finding {finding.get('severity', '')} at "
+                f"{finding['file']}:{finding['line']} is a generic code smell, not a "
+                "working unauthenticated exploit against POST /device/command — "
                 "re-check SemGrep's CWE-306 finding instead."
             ),
         }
 
-    if finding["scanner"] == "semgrep" and finding.get("cveRef") == "CVE-2019-6538":
-        # TODO(dev): once device-service is live, replace this with an actual
-        # unauthenticated probe request (no Authorization header) against
-        # `{base_url}/device/command` and check for a 2xx instead of
-        # 401/403. Kept deterministic/offline here so SCAN never blocks on
-        # a device-service that isn't running yet.
+    if finding["scanner"] == "semgrep":
+        live = _live_missing_auth_probe(base_url)
+        if live is not None:
+            return live
+        # Offline fallback: trust the static SemGrep match on the command route.
         return {
             "reproduced": True,
+            "live": False,
             "detail": (
                 f"SemGrep finding at {finding['file']}:{finding['line']} matches the "
-                "missing-auth handler (CWE-306) — confirmed exploitable, grounded by CVE-2019-6538."
+                "missing-auth handler (CWE-306). Device-service not reachable for a live "
+                "probe; treating the static match as reproduced (offline mode)."
             ),
         }
 
-    return {"reproduced": False, "detail": "Unrecognized finding shape — treated as not reproduced."}
+    return {"reproduced": False, "live": False, "detail": "Unrecognized finding shape — treated as not reproduced."}
 
 
 if __name__ == "__main__":

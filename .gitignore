@@ -26,6 +26,11 @@ target/
 /recordings/
 *.mp4
 
+# security loop runtime artifacts (the shared device_status row sink + receipts)
+security/.device_row.json
+security/.runs/
+*.device_row.json
+
 # OS / editor
 .DS_Store
 Thumbs.db

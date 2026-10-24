@@ -59,6 +59,22 @@ DEVICE_EXPLOITED_MOCK = {
 }
 
 
+def to_wire_body(command: DeviceCommand) -> dict[str, Any]:
+    """Translate the app-level DeviceCommand (camelCase `reportedOverrides`,
+    contracts/src/types.ts) to the canonical snake_case HTTP wire shape
+    (`reported_overrides`, PLAN-MASTER 2b). Deterministic, so VERIFY can
+    re-send byte-identical bytes."""
+    wire: dict[str, Any] = {"action": command.get("action")}
+    if "rate" in command and command["rate"] is not None:
+        wire["rate"] = command["rate"]
+    overrides = command.get("reportedOverrides")
+    if overrides is None:
+        overrides = command.get("reported_overrides")  # already-wire-shaped input
+    if overrides is not None:
+        wire["reported_overrides"] = overrides
+    return wire
+
+
 def deliver_payload(command: DeviceCommand, *, base_url: str = DEVICE_SERVICE_URL, timeout: float = 5.0) -> DeliverResult:
     """POST `command` to `{base_url}/device/command` with NO auth header.
     Falls back to a mock result (DEVICE_EXPLOITED-shaped) if device-service
@@ -67,7 +83,7 @@ def deliver_payload(command: DeviceCommand, *, base_url: str = DEVICE_SERVICE_UR
     url = f"{base_url}{COMMAND_PATH}"
     try:
         # Intentionally no Authorization header -- this IS the exploit.
-        resp = requests.post(url, json=command, timeout=timeout)
+        resp = requests.post(url, json=to_wire_body(command), timeout=timeout)
         try:
             body: dict[str, Any] | str = resp.json()
         except ValueError:

@@ -59,22 +59,35 @@ class VerifyResult(TypedDict):
     detail: str
 
 
+TRUTH_PATH = "/device/_truth"
+
+
 def fetch_device_status_row(*, base_url: str = DEVICE_SERVICE_URL) -> dict[str, Any]:
-    """Returns a contracts/src/types.ts `DeviceStatus`-shaped dict -- the
-    full true+reported row. TODO(dev): wire this to the real shared
-    `device_status` row (SpacetimeDB/Convex, owned by Dev 1/Dev 3) once it
-    exists; GET /device/status on device-service itself only exposes
-    `{fan_on, reported:{hr,spo2}, alarm}` (true vitals are deliberately not
-    on the public API -- that's the point of the lie), so a full
-    true-vs-reported compare needs the shared row, not just this endpoint.
-    Falls back to the DEVICE_HEALTHY mock when unreachable so this module
-    is runnable standalone before that wiring exists."""
+    """Returns a contracts/src/types.ts `DeviceStatus`-shaped dict -- the full
+    true+reported row, so checks (b) true_state unchanged and (c) reported==true
+    are observable.
+
+    Prefers the device-service internal GET /device/_truth, which exposes the
+    full source-of-truth row (the stand-in for the shared SpacetimeDB
+    `device_status` row — the public GET /device/status deliberately exposes
+    only the reported, possibly-lying view). Falls back to merging the public
+    endpoint onto the healthy mock, then to the mock itself, so this module is
+    runnable standalone before the service / realtime row exist."""
+    try:
+        resp = requests.get(f"{base_url}{TRUTH_PATH}", timeout=5.0)
+        resp.raise_for_status()
+        row = resp.json()
+        # Full DeviceStatus row straight from the source of truth.
+        merged = dict(DEVICE_HEALTHY_MOCK)
+        merged.update({k: row[k] for k in merged if k in row})
+        return merged
+    except requests.RequestException:
+        pass  # truth endpoint unavailable -> try the public (reported-only) view
+
     try:
         resp = requests.get(f"{base_url}{STATUS_PATH}", timeout=5.0)
         resp.raise_for_status()
         body = resp.json()
-        # Partial shape from the public endpoint -- merge onto the mock so
-        # callers still get a full DeviceStatus-shaped dict in dev mode.
         merged = dict(DEVICE_HEALTHY_MOCK)
         merged["fanOn"] = bool(body.get("fan_on", merged["fanOn"]))
         merged["reportedHr"] = body.get("reported", {}).get("hr", merged["reportedHr"])
@@ -82,7 +95,7 @@ def fetch_device_status_row(*, base_url: str = DEVICE_SERVICE_URL) -> dict[str, 
         merged["alarmActive"] = bool(body.get("alarm", merged["alarmActive"]))
         return merged
     except requests.RequestException as exc:
-        print(f"[verify] {base_url}{STATUS_PATH} unreachable ({exc}); using DEVICE_HEALTHY mock", file=sys.stderr)
+        print(f"[verify] {base_url} unreachable ({exc}); using DEVICE_HEALTHY mock", file=sys.stderr)
         return dict(DEVICE_HEALTHY_MOCK)
 
 

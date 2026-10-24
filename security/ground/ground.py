@@ -112,24 +112,54 @@ def _extract_cwe_ids(nvd_json: dict[str, Any]) -> list[str]:
     return cwe_ids or ["CWE-306", "CWE-862"]  # documented fallback (see module docstring)
 
 
-def _extract_nvd_cvss(nvd_json: dict[str, Any]) -> CvssEntry:
+_CVSS_LABEL = {
+    "cvssMetricV31": "NVD CVSS v3.1",
+    "cvssMetricV30": "NVD CVSS v3.0",
+    "cvssMetricV2": "NVD CVSS v2.0",
+}
+
+
+def _severity_for_v2(score: float) -> str:
+    # CVSS v2 has no baseSeverity field; derive the conventional band.
+    if score >= 7.0:
+        return "HIGH"
+    if score >= 4.0:
+        return "MEDIUM"
+    return "LOW"
+
+
+def _extract_all_nvd_cvss(nvd_json: dict[str, Any]) -> dict[str, CvssEntry]:
+    """Return EVERY CVSS metric NVD publishes for this CVE, keyed by version.
+    CVE-2019-6538 (live NVD data, cached) is scored 9.3 CRITICAL under CVSS v3.1
+    but only 3.3 under CVSS v2.0 (vector AV:A — adjacent, not remote) — surfacing
+    both (rather than silently picking one) is the honest way to show 'how bad
+    this is depends on who scored it and under which rubric'."""
+    out: dict[str, CvssEntry] = {}
     try:
         metrics = nvd_json["vulnerabilities"][0]["cve"]["metrics"]
-        for key in ("cvssMetricV31", "cvssMetricV30", "cvssMetricV2"):
-            if key in metrics and metrics[key]:
-                cvss_data = metrics[key][0]["cvssData"]
-                return {
-                    "score": float(cvss_data["baseScore"]),
-                    "severity": str(cvss_data.get("baseSeverity", "")).upper() or "UNKNOWN",
-                    "source": f"NVD {key}",
-                }
-    except (KeyError, IndexError, TypeError, ValueError):
-        pass
-    return {
-        "score": FALLBACK_NVD_CVSS_SCORE,
-        "severity": FALLBACK_NVD_CVSS_SEVERITY,
-        "source": "NVD (fallback — cached/offline value, see ground.py)",
-    }
+    except (KeyError, IndexError, TypeError):
+        metrics = {}
+    for key in ("cvssMetricV31", "cvssMetricV30", "cvssMetricV2"):
+        entries = metrics.get(key) or []
+        if not entries:
+            continue
+        try:
+            cvss_data = entries[0]["cvssData"]
+            score = float(cvss_data["baseScore"])
+        except (KeyError, IndexError, TypeError, ValueError):
+            continue
+        severity = str(cvss_data.get("baseSeverity", "")).upper()
+        if not severity:
+            severity = _severity_for_v2(score) if key == "cvssMetricV2" else "UNKNOWN"
+        short = "nvd_v31" if key == "cvssMetricV31" else "nvd_v30" if key == "cvssMetricV30" else "nvd_v2"
+        out[short] = {"score": score, "severity": severity, "source": _CVSS_LABEL[key]}
+    if not out:
+        out["nvd"] = {
+            "score": FALLBACK_NVD_CVSS_SCORE,
+            "severity": FALLBACK_NVD_CVSS_SEVERITY,
+            "source": "NVD (fallback — cached/offline value, see ground.py)",
+        }
+    return out
 
 
 def build_grounding_card(nvd_json: dict[str, Any], *, cve_id: str = GROUNDING_CVE_ID, from_cache: bool = False) -> GroundingCard:
@@ -137,17 +167,17 @@ def build_grounding_card(nvd_json: dict[str, Any], *, cve_id: str = GROUNDING_CV
     if CISA_CWE not in cwe_ids:
         cwe_ids.append(CISA_CWE)
 
+    cvss: dict[str, CvssEntry] = _extract_all_nvd_cvss(nvd_json)
+    cvss["cisa"] = {
+        "score": CISA_CVSS_SCORE,
+        "severity": CISA_CVSS_SEVERITY,
+        "source": "CISA ICS medical-device advisory",
+    }
+
     return {
         "cveId": cve_id,
         "cwe": cwe_ids,
-        "cvss": {
-            "nvd": _extract_nvd_cvss(nvd_json),
-            "cisa": {
-                "score": CISA_CVSS_SCORE,
-                "severity": CISA_CVSS_SEVERITY,
-                "source": "CISA ICS medical-device advisory",
-            },
-        },
+        "cvss": cvss,
         "summary": (
             "Missing authentication on a medical-device command interface "
             "(CWE-306 / CWE-862) lets an unauthenticated network attacker "

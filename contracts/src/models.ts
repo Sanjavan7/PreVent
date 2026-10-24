@@ -10,10 +10,25 @@ export const CLAUDE_MODELS = {
 export const ANTHROPIC_VERSION = '2026-10-21';
 export const CLAUDE_AGENT_SDK = '@anthropic-ai/claude-agent-sdk@0.3.310';
 
-// Bitdeer (OpenAI-compatible). Model id verified 2026-10-24 (DeepSeek-V4-Pro does NOT exist).
+// Exploit-PoC generation is provider-agnostic (any OpenAI-compatible
+// /v1/chat/completions endpoint with Authorization: Bearer). Both providers host
+// the SAME deepseek-ai/DeepSeek-V4.1-Flash-1017 model.
+//
+// FEATHERLESS is primary (Bitdeer had not funded hackathon credits — its key
+// authenticates but returns HTTP 402 insufficient_balance). The model id carries
+// a date suffix (`-1017`); the suffix-less id is a fallback.
+export const EXPLOIT_MODEL = 'deepseek-ai/DeepSeek-V4.1-Flash-1017';
+export const EXPLOIT_MODEL_FALLBACK = 'deepseek-ai/DeepSeek-V4.1-Flash';
+
+export const FEATHERLESS = {
+  baseUrl: 'https://api.featherless.ai/v1',
+  model: EXPLOIT_MODEL,
+} as const;
+
 export const BITDEER = {
   baseUrl: 'https://api-inference.bitdeer.ai/v1',
-  model: 'deepseek-ai/DeepSeek-V4.1-Flash',
+  model: EXPLOIT_MODEL,
+  modelFallback: EXPLOIT_MODEL_FALLBACK,
   altModel: 'zai-org/GLM-5.3',
 } as const;
 
