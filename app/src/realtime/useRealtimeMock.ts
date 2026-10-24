@@ -8,7 +8,10 @@ import {
   DEVICE_HEALTHY,
   MOCK_AGENTS,
   MOCK_EVENT_LOG,
+  MOCK_EXPLOIT_RUNS,
   MOCK_FINDINGS,
+  MOCK_IR_EVENTS,
+  MOCK_PATCH_ATTEMPTS,
 } from '@prevent/contracts';
 
 import type { RealtimeState } from './useRealtime';
@@ -28,6 +31,9 @@ export function useRealtimeMock(): RealtimeState {
       agents: MOCK_AGENTS,
       findings: MOCK_FINDINGS,
       eventLog: MOCK_EVENT_LOG,
+      exploitRuns: MOCK_EXPLOIT_RUNS,
+      patchAttempts: MOCK_PATCH_ATTEMPTS,
+      irEvents: MOCK_IR_EVENTS,
       mockExploited,
       setMockExploited,
     }),

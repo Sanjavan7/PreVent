@@ -9,7 +9,10 @@ import type {
   AgentStatus,
   DeviceStatus,
   EventLogRow,
+  ExploitRun,
   Finding,
+  IrEvent,
+  PatchAttempt,
 } from '@prevent/contracts';
 
 import { useRealtimeLive } from './useRealtimeLive';
@@ -24,6 +27,12 @@ export interface RealtimeState {
   agents: AgentStatus[];
   findings: Finding[];
   eventLog: EventLogRow[];
+  /** Exploit replays either side of the patch (newest first). */
+  exploitRuns: ExploitRun[];
+  /** Patch attempts incl. the inline diff + human-approval state (newest first). */
+  patchAttempts: PatchAttempt[];
+  /** IR remote picks driving the hardware demo rig (newest first). */
+  irEvents: IrEvent[];
   /** Mock-only: flip the device between healthy and exploited fixtures. */
   mockExploited: boolean;
   setMockExploited: (exploited: boolean) => void;

@@ -5,7 +5,10 @@ import type {
   AgentStatus,
   DeviceStatus,
   EventLogRow,
+  ExploitRun,
   Finding,
+  IrEvent,
+  PatchAttempt,
   Stage,
 } from './types';
 
@@ -86,4 +89,62 @@ export const MOCK_FINDINGS: Finding[] = [
 
 export const MOCK_EVENT_LOG: EventLogRow[] = [
   { id: 1, ts: 0, actor: 'orchestrator', text: 'Pipeline idle. Device healthy.' },
+];
+
+/** The two exploit replays either side of the patch: the first unauthenticated
+ *  POST lands pre-patch (fan stops, device lies); the same payload bounces off a
+ *  401 once the CWE-306 fix is deployed. `findingId` points at the real finding
+ *  (MOCK_FINDINGS id 2, the CVE-2019-6538 / CWE-306 row). */
+export const MOCK_EXPLOIT_RUNS: ExploitRun[] = [
+  {
+    id: 1,
+    findingId: 2,
+    modelId: 'bitdeer/deepseek-v3',
+    payloadRef: 'POST /device/command {"action":"stop_fan"}',
+    deliveredAt: 2,
+    deviceImpact: '200 OK — fan actuator obeyed unsigned payload; vitals diverge',
+    success: true,
+  },
+  {
+    id: 2,
+    findingId: 2,
+    modelId: 'bitdeer/deepseek-v3',
+    payloadRef: 'POST /device/command {"action":"stop_fan"}',
+    deliveredAt: 5,
+    deviceImpact: '401 Unauthorized — X-Device-Token required; fan state unchanged',
+    success: false,
+  },
+];
+
+/** The Factory Droid patch awaiting human sign-off. `diffRef` carries an inline
+ *  unified diff adding the missing auth check to POST /device/command. */
+export const MOCK_PATCH_ATTEMPTS: PatchAttempt[] = [
+  {
+    id: 1,
+    findingId: 2,
+    diffRef: `--- a/device-service/app.py
++++ b/device-service/app.py
+@@ -38,7 +38,12 @@ app = Flask(__name__)
+ @app.route("/device/command", methods=["POST"])
+ def device_command():
+-    payload = request.get_json(force=True)
++    token = request.headers.get("X-Device-Token")
++    if not token or not constant_time_compare(token, DEVICE_TOKEN):
++        return jsonify({"error": "unauthorized"}), 401
++    payload = request.get_json(force=True)
++    payload.pop("reportedOverrides", None)
+     action = payload.get("action")
+     return apply_command(action, payload)`,
+    droidSession: 'droid-7f3a1c',
+    proposedAt: 4,
+    humanApproved: true,
+    appliedAt: 5,
+  },
+];
+
+/** IR remote picks that select which attack payload to deliver (used by the
+ *  hardware demo rig). Codes map to the stop_fan / resume beats. */
+export const MOCK_IR_EVENTS: IrEvent[] = [
+  { id: 1, ts: 2, code: 16753245, consumed: true },
+  { id: 2, ts: 5, code: 16736925, consumed: false },
 ];
