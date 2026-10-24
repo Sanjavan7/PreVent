@@ -58,7 +58,9 @@ export class MockBackend implements RealtimeBackend {
     }
     const listener = cb as unknown as AnyListener;
     set.add(listener);
-    cb([...this.store[table]]);
+    // Cast through unknown because the TS compiler cannot narrow Store[K]
+    // (a union of per-table arrays) to TableMap[K][] on its own.
+    cb([...this.store[table]] as unknown as TableMap[K][]);
     return () => {
       set.delete(listener);
     };

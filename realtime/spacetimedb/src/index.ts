@@ -155,8 +155,13 @@ export default spacetimedb;
 // Helpers (not exported)
 // ---------------------------------------------------------------------------
 
-// Derive the reducer ctx type from the module itself (works for init and reducers).
-type Ctx = Parameters<Parameters<typeof spacetimedb.init>[0]>[0];
+// Loosely-typed ctx for helpers (requireRole / nowMs / log). The reducer
+// bodies themselves still get the SDK's precisely-inferred context.
+// SDK quirk: deriving from typeof spacetimedb.init collapsed to `never`
+// under TS 7, and ReducerCtx<typeof spacetimedb> rejects our schema shape.
+// Server module compiles to WASM; runtime is unaffected.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type Ctx = any;
 
 type Role = 'device' | 'scanner' | 'exploit' | 'patcher' | 'human' | 'bridge';
 const PIPELINE_ROLES: Role[] = ['device', 'scanner', 'exploit', 'patcher', 'human', 'bridge'];

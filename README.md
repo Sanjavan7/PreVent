@@ -37,9 +37,42 @@ Per-person task plans are in **`plans/`** (`PLAN-FOUNDATION.md`, `PLAN-DEV1…`,
 cp .env.example .env            # fill in keys (all OPTIONAL for the security loop — see below)
 pnpm install
 pnpm -r typecheck
-# SpacetimeDB (Windows): irm https://windows.spacetimedb.com -useb | iex ; then: spacetime install 2.13.0
-# redeem free Maincloud credits: spacetimedb.com/redeem  code: CALHACKS13
 ```
+
+## Realtime: connect to the shared Maincloud instance (no CLI needed)
+The `prevent` module is already published to SpacetimeDB Maincloud. Teammates do **not** need the `spacetime` CLI during development — just set three lines in `.env` and `pnpm dev`:
+
+```
+VITE_REALTIME_BACKEND=spacetimedb
+VITE_SPACETIMEDB_URI=wss://maincloud.spacetimedb.com
+VITE_SPACETIMEDB_MODULE=prevent
+```
+
+- **Dashboard** (watch live state): https://spacetimedb.com/prevent
+- **Everyone writes to the same `device_status` row** — that's expected (it's the demo).
+- **Owner (Dev 3) only:** when the module schema changes, republish with `spacetime publish --module-path realtime/spacetimedb --server maincloud prevent`, regenerate bindings (`spacetime generate --lang typescript --module-path realtime/spacetimedb --out-dir realtime/src/module_bindings`), commit the bindings and push. Everyone else just `git pull` + `pnpm install`.
+
+### Local fallback (optional, if Maincloud flakes)
+Needs the `spacetime` CLI (macOS: `curl -sSf https://install.spacetimedb.com | sh`, then `spacetime install 2.13.0; spacetime version use 2.13.0`).
+```bash
+spacetime start                                                          # background: local server on :3000
+spacetime publish --module-path realtime/spacetimedb --server local prevent
+# flip .env: VITE_SPACETIMEDB_URI=ws://localhost:3000
+```
+
+### SpacetimeDB credit
+Redeem code `CALHACKS13` at https://spacetimedb.com/redeem for 100k TeV (a month of Pro).
+
+## Convex fallback (only if the SpacetimeDB TS loop trips the H13 gate)
+A Convex **cloud dev deployment** is already provisioned so the swap stays "one file":
+```
+VITE_REALTIME_BACKEND=convex           # <- only flip this line
+VITE_CONVEX_URL=https://spotted-kudu-58.convex.cloud
+```
+- **Dashboard:** https://dashboard.convex.dev/t/sanjavan/prevent-dc2b7
+- **Project:** `sanjavan:prevent-dc2b7`, dev deployment `spotted-kudu-58` (US East)
+- **Status:** client adapter in `realtime/src/backend/convex.ts` is wired; **Convex server functions in `realtime/convex/` are NOT written yet** — Dev 3 will build them (schema + per-table queries + per-reducer mutations with `ctx.auth.getUserIdentity()`) **only if we actually need the fallback** (forfeits the SpacetimeDB prize). Until then this stays dormant.
+- No CLI needed by teammates. Owner (Dev 3) runs `npx convex login`, `npx convex deployment create ... --select` for provisioning; teammates just pull.
 
 ### Security loop (Dev 2) — runs headless, offline, with no API keys
 ```bash

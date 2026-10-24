@@ -1,29 +1,19 @@
-// Single data hook for both panels. Both read the SAME rows (zero desync).
+// Realtime hook facade: picks the mock or live implementation ONCE at module
+// load based on VITE_REALTIME_BACKEND. Panels import only `useRealtime` and
+// stay backend-agnostic.
 //
-// TODO(dev): swap the mock body for live SpacetimeDB subscriptions:
-//   import { SpacetimeDBProvider, useTable } from 'spacetimedb/react';
-//   const [deviceRows, ready] = useTable(tables.device_status);
-//   const [agentRows] = useTable(tables.agent_status);
-//   const [findingRows] = useTable(tables.finding);
-//   const [logRows] = useTable(tables.event_log);
-// Wrap <App/> in <SpacetimeDBProvider connectionBuilder={...}> in main.tsx
-// (pass the DbConnection.builder() result, do NOT call .build()).
-// Keep this hook's return shape stable so panels do not change.
+// Hook-rules note: because `BACKEND` is a Vite build-time constant, the same
+// implementation is called every render. React's rules of hooks are satisfied.
 
-import { useCallback, useMemo, useState } from 'react';
-import {
-  DEVICE_EXPLOITED,
-  DEVICE_HEALTHY,
-  MOCK_AGENTS,
-  MOCK_EVENT_LOG,
-  MOCK_FINDINGS,
-} from '@prevent/contracts';
 import type {
   AgentStatus,
   DeviceStatus,
   EventLogRow,
   Finding,
 } from '@prevent/contracts';
+
+import { useRealtimeLive } from './useRealtimeLive';
+import { useRealtimeMock } from './useRealtimeMock';
 
 export type RealtimeMode = 'mock' | 'live';
 
@@ -39,24 +29,10 @@ export interface RealtimeState {
   setMockExploited: (exploited: boolean) => void;
 }
 
-export function useRealtime(): RealtimeState {
-  const [mockExploited, setMockExploitedState] = useState(false);
-  const setMockExploited = useCallback(
-    (v: boolean) => setMockExploitedState(v),
-    [],
-  );
+const BACKEND = import.meta.env.VITE_REALTIME_BACKEND ?? 'mock';
+const useRealtimeImpl: () => RealtimeState =
+  BACKEND === 'spacetimedb' ? useRealtimeLive : useRealtimeMock;
 
-  return useMemo<RealtimeState>(
-    () => ({
-      mode: 'mock',
-      ready: true,
-      device: mockExploited ? DEVICE_EXPLOITED : DEVICE_HEALTHY,
-      agents: MOCK_AGENTS,
-      findings: MOCK_FINDINGS,
-      eventLog: MOCK_EVENT_LOG,
-      mockExploited,
-      setMockExploited,
-    }),
-    [mockExploited, setMockExploited],
-  );
+export function useRealtime(): RealtimeState {
+  return useRealtimeImpl();
 }

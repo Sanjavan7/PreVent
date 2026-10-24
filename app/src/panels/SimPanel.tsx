@@ -1,14 +1,14 @@
 import type { DeviceStatus } from '@prevent/contracts';
+import { PatientMonitor } from './pixi/PatientMonitor';
 
 // Left panel: patient monitor. Renders from the same device_status row as the
 // dashboard and the Arduino. The banner follows REPORTED (alarmActive) state, so
 // it stays green during the lie while the true vitals crash.
 //
-// TODO(dev): replace the placeholder canvas box with PixiJS:
-//   const app = new Application(); await app.init({ background: '#0B0F14', resizeTo: host });
-//   host.appendChild(app.canvas);  // then draw ECG / SpO2 pleth / respiration polylines
-//   Respiration waveform should sync to device.fanOn. Add ward grid (~40 beds),
-//   flatline + Web Audio triple-beep + red vignette on crash, exhale on restore.
+// The <PatientMonitor /> below is a PixiJS v8 canvas: three waveform lanes
+// (ECG, SpO2 pleth, respiration) scrolling right-to-left. ECG/SpO2 follow
+// REPORTED values so the device can lie; respiration follows TRUE fanOn and
+// flatlines when the ventilator stops.
 
 interface Props {
   device: DeviceStatus;
@@ -70,13 +70,7 @@ export function SimPanel({ device }: Props) {
         {bannerOk ? 'NORMAL' : 'ALARM'}
       </div>
 
-      {/* TODO(dev): PixiJS canvas mounts here. */}
-      <div
-        className="flex min-h-48 flex-1 items-center justify-center rounded-lg border border-dashed border-border bg-surface/50 font-mono text-xs text-muted"
-        data-todo="pixi-canvas"
-      >
-        PixiJS waveform canvas (TODO)
-      </div>
+      <PatientMonitor device={device} />
 
       <div>
         <div className="mb-2 font-mono text-xs uppercase tracking-wider text-muted">
