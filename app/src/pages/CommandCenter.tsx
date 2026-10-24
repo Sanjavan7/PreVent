@@ -54,7 +54,7 @@ export function CommandCenter() {
             eventLog={rt.eventLog}
             exploitRuns={rt.exploitRuns}
             patchAttempts={rt.patchAttempts}
-            live
+            live={rt.mode === 'live'}
           />
         </div>
       </main>

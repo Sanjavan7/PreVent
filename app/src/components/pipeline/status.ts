@@ -19,12 +19,25 @@ export type ActivityStatus =
 /** One-line title per stage (the feed row heading). */
 export const STAGE_TITLE: Record<Stage, string> = {
   ground: 'Grounded device context',
-  scan: 'Scanned firmware',
+  scan: 'Scanned device service',
   generate: 'Generated the exploit proof',
   deliver: 'Proved the exploit in sandbox',
   patch: 'Writing the auth fix',
   verify: 'Verified the fix',
   restore: 'Restored the device',
+};
+
+/** One concise summary line kept on a stage after it collapses to `done`, so a
+ *  finished row reads as more than "title + Done" once its streaming reasoning
+ *  and confidence meter have unmounted. */
+export const STAGE_SUMMARY: Record<Stage, string> = {
+  ground: 'Firmware + device-service source pulled into context.',
+  scan: 'semgrep: missing auth on POST /device/command — CWE-306.',
+  generate: 'PoC ready — unsigned stop_fan while vitals still read normal.',
+  deliver: '200 OK — the device obeyed the unsigned payload.',
+  patch: 'Auth fix approved and deployed to device-service/.',
+  verify: 'Same exploit replayed → 401 Unauthorized.',
+  restore: 'Device restored to its signed-command baseline; vitals recovered.',
 };
 
 /** Map the raw agent state onto the five UI statuses. */

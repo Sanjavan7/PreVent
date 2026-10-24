@@ -169,13 +169,19 @@ export function useRealtimeMock(): RealtimeState {
     setAgents(
       baseAgents().map((a) => {
         if (a.stage === 'ground')
-          return { ...a, state: 'done', confidence: 1, updatedAt: Date.now() };
+          return {
+            ...a,
+            agentName: 'Claude · ground',
+            state: 'done',
+            confidence: 1,
+            updatedAt: Date.now(),
+          };
         if (a.stage === 'scan')
           return {
             ...a,
             agentName: 'Claude · scan',
             state: 'running',
-            reasoning: 'Pulling firmware + device-service source into context. ',
+            reasoning: 'Pulling the device-service source into context. ',
             confidence: 0.3,
             updatedAt: Date.now(),
           };
@@ -323,7 +329,7 @@ export function useRealtimeMock(): RealtimeState {
     schedule(7900, () => {
       streamAgent(
         'patch',
-        'Rejected my first fix — it broke the emergency override. Revising to gate only unsigned writes while preserving the resume path. ',
+        'Claude rejected its first fix — it broke the emergency override. Revising to gate only unsigned writes while preserving the resume path. ',
         { confidence: 0.76 },
       );
       log('guardrail', 'Sandbox refused the destructive call outside device-service/ scope.');
@@ -344,7 +350,9 @@ export function useRealtimeMock(): RealtimeState {
         if (fired) return;
         fired = true;
         approveRef.current = null;
-        afterApprove();
+        // Defer the tail ~600ms so the gate's gray "Deploying…" spinner actually
+        // renders before patch flips to done. Timer is tracked for teardown.
+        schedule(600, afterApprove);
       };
       approveRef.current = proceed;
       schedule(6000, proceed); // auto-advance fallback if the judge never clicks

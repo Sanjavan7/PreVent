@@ -4,7 +4,7 @@
 import { STATUS_TOKENS, type ActivityStatus, type PillTone } from '../pipeline/status';
 
 const TONE: Record<PillTone, string> = {
-  neutral: 'border-border bg-surface-2 text-text-muted',
+  neutral: 'border-border bg-surface-2 text-text-secondary',
   accent: 'border-accent-border bg-accent-bg text-accent-fg',
   danger: 'border-danger/40 bg-danger-bg text-danger-fg',
 };

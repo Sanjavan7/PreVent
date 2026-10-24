@@ -13,7 +13,7 @@
 // each stage's sponsor-critical artifact via renderExtras so the feed stays
 // generic.
 
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { motion, useReducedMotion } from 'motion/react';
 import type {
   AgentStatus,
@@ -81,7 +81,7 @@ function StatusChip({ compromised, patched }: { compromised: boolean; patched: b
 function LiveChip({ live }: { live: boolean }) {
   return (
     <span
-      className="inline-flex items-center gap-1.5 rounded-xs border border-border bg-surface-2 px-1.5 py-0.5 text-meta text-text-muted"
+      className="inline-flex items-center gap-1.5 rounded-xs border border-border bg-surface-2 px-1.5 py-0.5 text-meta text-text-secondary"
       title="One shared SpacetimeDB row drives this screen, the monitor, and the device."
     >
       <span
@@ -130,7 +130,7 @@ function HeaderStrip({
       <StatusChip compromised={compromised} patched={patched} />
       <LiveChip live={live} />
       <span className="ml-auto text-meta tabular-nums text-text-muted">
-        1 of {FLEET_SIZE.toLocaleString()} devices
+        1 of {FLEET_SIZE.toLocaleString()} devices &middot; illustrative
       </span>
       <ProgressBars done={done} />
     </header>
@@ -139,16 +139,61 @@ function HeaderStrip({
 
 // ---------- In-step artifacts (injected via renderExtras) -------------------
 
-/** One-line inline sub-event: self-correction (muted) or guardrail refusal (danger). */
+/** One-line inline sub-event: a self-correction or a guardrail refusal. Both are
+ *  trust WINS, so both render neutral (never danger-red) and carry a small label
+ *  chip so the beat is legible on its own line. */
 function StepSubEvent({ kind, text }: { kind: 'self-correct' | 'guardrail'; text: string }) {
-  const danger = kind === 'guardrail';
+  const guardrail = kind === 'guardrail';
+  const glyph = guardrail ? '⊘' : '↻';
+  const label = guardrail ? 'Guardrail blocked' : 'Self-corrected';
   return (
-    <p className={`flex items-start gap-1.5 text-meta ${danger ? 'text-danger-fg' : 'text-text-muted'}`}>
+    <p className="flex items-start gap-1.5 text-meta text-text-secondary">
       <span aria-hidden className="shrink-0">
-        {danger ? '⌀' : '↻'}
+        {glyph}
       </span>
+      <span className="shrink-0 rounded-xs bg-surface-3 px-1.5 py-0.5 text-text-muted">{label}</span>
       <span>{text}</span>
     </p>
+  );
+}
+
+/** Small neutral checkmark glyph for the preflight list. */
+function Tick() {
+  return (
+    <svg aria-hidden width="12" height="12" viewBox="0 0 10 10" fill="none" className="shrink-0">
+      <path
+        d="M2 5.2 L4.2 7.4 L8 3"
+        stroke="var(--color-text-muted)"
+        strokeWidth="1.6"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+/** The Factory preflight checklist + Droid scope line. Lives in the patch step's
+ *  persistent extras (not inside ApprovalGate) so the safety story stays on
+ *  screen after the gate clears and the step collapses to its done row. */
+function PatchSafety() {
+  return (
+    <div className="mt-3 space-y-2 rounded-md border border-border bg-surface-2 p-3">
+      <ul className="space-y-1 text-sm text-text-secondary">
+        <li className="flex items-center gap-2">
+          <Tick /> Patch written
+        </li>
+        <li className="flex items-center gap-2">
+          <Tick /> Tests green in sandbox
+        </li>
+        <li className="flex items-center gap-2">
+          <Tick /> Exploit proof captured
+        </li>
+      </ul>
+      <p className="text-meta text-text-secondary">
+        Droid scoped to <code className="font-mono">device-service/</code> &middot; cannot commit,
+        push, or deploy.
+      </p>
+    </div>
   );
 }
 
@@ -158,7 +203,7 @@ function RequestCard({ compromised }: { compromised: boolean }) {
   return (
     <div className="flex flex-wrap items-center gap-x-2 gap-y-1 rounded-sm border border-border bg-surface-2 px-2.5 py-1.5 font-mono text-meta">
       <span className="text-text-secondary">→ POST /device/command</span>
-      <span className="text-text-muted">no auth · CWE-306</span>
+      <span className="text-text-secondary">no auth · CWE-306</span>
       <span
         className="ml-auto rounded-xs px-1.5 py-0.5"
         style={
@@ -169,6 +214,7 @@ function RequestCard({ compromised }: { compromised: boolean }) {
       >
         {compromised ? '200 OK' : '—'}
       </span>
+      <span className="w-full text-text-secondary">payload by DeepSeek-V3 · Bitdeer</span>
     </div>
   );
 }
@@ -178,21 +224,27 @@ function RequestCard({ compromised }: { compromised: boolean }) {
 function Payoff401() {
   const reduce = useReducedMotion();
   return (
-    <div className="space-y-1.5">
-      <p className="text-sm text-text-secondary">Same request, replayed → 401 Unauthorized.</p>
-      <motion.span
-        className="inline-flex items-center rounded-xs px-2 py-0.5 font-mono text-meta font-medium"
-        style={{
-          background: 'var(--color-success-bg)',
-          color: 'var(--color-success-fg)',
-          boxShadow: 'inset 0 -2px 0 var(--color-success)',
-        }}
-        initial={reduce ? false : { scale: 0.6, opacity: 0 }}
-        animate={{ scale: 1, opacity: 1 }}
-        transition={reduce ? { duration: 0 } : SPRING.snap}
-      >
-        401 Unauthorized
-      </motion.span>
+    <div className="space-y-2">
+      <p className="text-sm text-text-secondary">The exact same unsigned request, replayed against the patched endpoint.</p>
+      <div className="flex flex-wrap items-center gap-2 font-mono">
+        <span className="rounded-xs bg-surface-3 px-1.5 py-0.5 text-meta text-text-muted line-through">
+          200 OK
+        </span>
+        <span aria-hidden className="text-text-muted">→</span>
+        <motion.span
+          className="inline-flex items-center rounded-xs px-2.5 py-1 text-xl font-semibold"
+          style={{
+            background: 'var(--color-success-bg)',
+            color: 'var(--color-success-fg)',
+            boxShadow: 'inset 0 -2px 0 var(--color-success)',
+          }}
+          initial={reduce ? false : { scale: 0.6, opacity: 0 }}
+          animate={{ scale: 1, opacity: 1 }}
+          transition={reduce ? { duration: 0 } : SPRING.snap}
+        >
+          401 Unauthorized
+        </motion.span>
+      </div>
     </div>
   );
 }
@@ -201,11 +253,10 @@ function Payoff401() {
 function AuditReceipt({ device }: { device: DeviceStatus }) {
   const ts = new Date(device.updatedAt || Date.now()).toISOString();
   return (
-    <Disclosure trigger="Audit receipt">
+    <Disclosure trigger="FDA §524B audit receipt">
       <div className="rounded-sm border border-border bg-surface-2 p-3">
         <div className="mb-2 flex items-center gap-2 text-overline uppercase tracking-wide text-text-muted">
-          <span>FDA §524B</span>
-          <span style={{ color: 'var(--color-success-fg)' }}>✓</span>
+          <span>§524B-style audit record (demonstration)</span>
         </div>
         <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 font-mono text-meta">
           <dt className="text-text-muted">Device</dt>
@@ -257,7 +308,7 @@ function selfCorrectionText(agents: AgentStatus[]): string | null {
     const t = (x.reasoning || '').toLowerCase();
     return t.includes('rejected') || t.includes('revis') || t.includes('self-correct');
   });
-  return a ? 'Revised once — the first fix broke the emergency override.' : null;
+  return a ? 'Claude revised once — the first fix broke the emergency override.' : null;
 }
 
 function guardrailText(eventLog: EventLogRow[]): string | null {
@@ -288,6 +339,13 @@ export function DashboardPanel({
     setApproved(true);
     requestMockApprove();
   }, []);
+
+  // Reset the gate whenever the device returns to healthy (every Reset-to-healthy
+  // before the next run), so a second "Simulate exploit" shows the blue Approve
+  // button again instead of the stuck gray "Deploying…" spinner.
+  useEffect(() => {
+    if (!device.compromised) setApproved(false);
+  }, [device.compromised]);
 
   // PURE selector, memoized in render (never in an effect).
   const entries = useMemo(() => deriveActivity(agents), [agents]);
@@ -336,6 +394,7 @@ export function DashboardPanel({
             {selfCorrect ? <StepSubEvent kind="self-correct" text={selfCorrect} /> : null}
             {guardrail ? <StepSubEvent kind="guardrail" text={guardrail} /> : null}
             <CompactDiff diff={diff} />
+            <PatchSafety />
             <ApprovalGate
               show={entry.status === 'needs-approval'}
               approved={approved}
