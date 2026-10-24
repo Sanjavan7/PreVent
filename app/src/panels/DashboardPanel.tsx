@@ -567,7 +567,7 @@ const AwaitingApprovalCard = forwardRef<
             whileTap={{ scale: 0.97 }}
             transition={SPRING.snappy}
             exit={{ opacity: 0 }}
-            className="prevent-transition pulse mt-3 w-full rounded-md bg-warn px-4 py-2 font-mono text-label font-semibold uppercase tracking-wider text-bg hover:brightness-110"
+            className="prevent-transition pulse mt-3 w-full rounded-md bg-blue px-4 py-2 font-mono text-label font-semibold uppercase tracking-wider text-bg hover:brightness-110"
           >
             Approve &amp; deploy
           </motion.button>

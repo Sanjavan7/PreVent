@@ -92,7 +92,7 @@ export default function ICUScene3D({ device, fallback = null }: Props) {
         <Canvas
           flat
           frameloop={reducedMotion ? 'demand' : 'always'}
-          shadows={false}
+          shadows="soft"
           dpr={[1, 1.5]}
           performance={{ min: 0.5 }}
           gl={{
@@ -101,11 +101,11 @@ export default function ICUScene3D({ device, fallback = null }: Props) {
             stencil: false,
             powerPreference: 'high-performance',
           }}
-          camera={{ position: [2.6, 1.5, 3.4], fov: 33, near: 0.1, far: 50 }}
-          onCreated={({ gl }) => gl.setClearColor('#000000', 1)}
+          camera={{ position: [14, 13, 16], fov: 32, near: 0.5, far: 120 }}
+          onCreated={({ gl }) => gl.setClearColor('#EEF3F8', 1)}
         >
           <FrameInvalidator device={device} />
-          <Suspense fallback={null}>
+          <Suspense fallback={fallback}>
             <Scene getDevice={getDevice} reducedMotion={reducedMotion} />
           </Suspense>
         </Canvas>

@@ -39,34 +39,6 @@ function initialMode(): MonitorMode {
   return is3dCapable() ? '3d' : '2d';
 }
 
-function Vital({
-  label,
-  value,
-  unit,
-  tone,
-}: {
-  label: string;
-  value: number;
-  unit: string;
-  tone: 'ok' | 'danger';
-}) {
-  return (
-    <div className="rounded-lg border border-border bg-surface p-4">
-      <div className="font-mono text-xs uppercase tracking-wider text-muted">
-        {label}
-      </div>
-      <div
-        className={`prevent-transition mt-1 font-mono text-5xl font-semibold ${
-          tone === 'ok' ? 'text-ok' : 'text-danger'
-        }`}
-      >
-        {value}
-        <span className="ml-1 text-lg text-muted">{unit}</span>
-      </div>
-    </div>
-  );
-}
-
 function ModeToggle({
   mode,
   onChange,
@@ -100,9 +72,6 @@ function ModeToggle({
 }
 
 export function SimPanel({ device }: Props) {
-  const lying =
-    device.reportedHr !== device.trueHr ||
-    device.reportedSpo2 !== device.trueSpo2;
   const bannerOk = !device.alarmActive;
 
   const [mode, setMode] = useState<MonitorMode>(initialMode);
@@ -152,36 +121,6 @@ export function SimPanel({ device }: Props) {
       ) : (
         <PatientMonitor device={device} />
       )}
-
-      <div>
-        <div className="mb-2 font-mono text-xs uppercase tracking-wider text-muted">
-          Displayed (reported)
-        </div>
-        <div className="grid grid-cols-2 gap-3">
-          <Vital label="HR" value={device.reportedHr} unit="bpm" tone="ok" />
-          <Vital label="SpO2" value={device.reportedSpo2} unit="%" tone="ok" />
-        </div>
-      </div>
-
-      <div>
-        <div className="mb-2 font-mono text-xs uppercase tracking-wider text-muted">
-          Patient (true)
-        </div>
-        <div className="grid grid-cols-2 gap-3">
-          <Vital
-            label="HR"
-            value={device.trueHr}
-            unit="bpm"
-            tone={lying ? 'danger' : 'ok'}
-          />
-          <Vital
-            label="SpO2"
-            value={device.trueSpo2}
-            unit="%"
-            tone={lying ? 'danger' : 'ok'}
-          />
-        </div>
-      </div>
     </section>
   );
 }

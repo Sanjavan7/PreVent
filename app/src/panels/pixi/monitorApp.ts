@@ -33,7 +33,7 @@ export const COLORS = {
   ok: 0x47c08a,
   accent: 0x38bdf8,
   warn: 0xffb020,
-  danger: 0xff4d4f,
+  danger: 0xff6b5b, // softened red -> coral to match the peaceful palette (spec §7)
 };
 
 // Horizontal scroll speed in CSS pixels per second (medical standard-ish).

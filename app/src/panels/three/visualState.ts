@@ -1,25 +1,24 @@
 // Pure, side-effect-free mapping from a DeviceStatus row to the TARGET visual
-// parameters of the 3D scene. This is intentionally a plain function (no React,
-// no three) so it can be unit-reasoned and called once per frame inside the
-// DeviceDriver's single useFrame (Stage 7) to compute damp targets.
+// parameters of the bright ward (spec §7b). This is intentionally a plain
+// function (no React, no three) so it can be unit-reasoned and called once per
+// frame inside the DeviceDriver's single useFrame to compute damp targets.
 //
 // It does NOT mutate anything and never reads the clock implicitly -- `now` is
 // injected so callers stay deterministic. Every field is a *target*; the
 // DeviceDriver eases the live scene toward these with maath/easing so crashes
 // and restores feel organic instead of snap-cut.
+//
+// The alert axis is WARM and LOCAL to the judge room (blue -> amber -> coral),
+// never a whole-room red strobe and never a darkening of the hospital. The rest
+// of the ward stays bright; a crash reads by FOCUS + WARMTH only.
 
 import type { DeviceStatus } from '@prevent/contracts';
 
-// sRGB hex ints (authoring space) for the two emotional poles of the scene.
-export const ACCENT_BLUE = 0x0097fe; // calm, healthy key/rim light + screen glow
-export const ALARM_RED = 0xff1d2e; // crash key/rim light
-export const LED_GREEN = 0x00ff9c; // healthy ventilator status LED
-export const LED_RED = 0xff1d2e; // compromised / alarm LED
-
-/** Monitor key light intensity envelope (see spec §4). */
-export const KEY_INTENSITY_CALM = 2.4;
-export const KEY_INTENSITY_ALARM_BASE = 1.6;
-export const KEY_INTENSITY_ALARM_AMP = 1.8; // pulses 1.6 <-> 3.4
+// sRGB hex ints (authoring space) for the warm-local alert axis.
+export const ACCENT_BLUE = 0x0097fe; // calm halo / cove / inlay
+export const SOFT_ALERT = 0xffb020; // amber -- physical crash, pre-admission
+export const CORAL = 0xff6b5b; // coral -- admitted alarm (never raw red)
+export const MINT = 0x3ddc97; // healthy ventilator status LED
 
 /** A device is considered physically crashed when the truth diverges from safe,
  * the ventilator has stopped, or the device finally admits the alarm. */
@@ -28,34 +27,35 @@ export function isCrashed(d: DeviceStatus): boolean {
 }
 
 export interface VisualTargets {
-  /** True physical emergency (room should redden, bloom should spike). */
+  /** True physical emergency (judge room warms + pulses). */
   crashed: boolean;
-  /** The device has admitted the alarm (red strobe + flatline + CODE HUD). */
+  /** The device has admitted the alarm (ring coral + CODE HUD + flatline). */
   alarm: boolean;
-  /** Firmware compromised (screen glitch + red vent LED even while numbers lie). */
+  /** Firmware compromised (coral vent LED even while the numbers lie). */
   compromised: boolean;
-  /** Reported vitals diverge from true vitals (optional "SIGNAL SUSPECT"). */
+  /** Reported vitals diverge from true vitals (the visible lie). */
   lying: boolean;
-  /** No fresh row for >3s (desaturate + "LINK LOST"). */
+  /** No fresh row for >3s. */
   stale: boolean;
 
-  /** Target color for the key + rim lights (sRGB hex int). */
-  accentColor: number;
+  /** 0 = calm blue, 1 = full warm (coral) -- LOCAL to the judge room. */
+  alertLevel: number;
+  /** Judge focus spot up + halo brightens + ward recedes. */
+  focusOn: boolean;
+  /** Cove-strip emissive target color. */
+  coveColor: number;
+  /** Floor halo ring target color. */
+  ringColor: number;
+  /** Floor rug inlay target color. */
+  inlayColor: number;
+  /** How much the OTHER rooms recede (0 calm .. 0.12 crash) via global light. */
+  restDim: number;
+  /** Whether the slow 0.8 Hz breath-pulse is active (never a strobe). */
+  pulseOn: boolean;
+
   /** Target emissive color for the ventilator status LED. */
   ledColor: number;
-
-  /** Base intensity for the monitor key light (pre-pulse). */
-  keyIntensityBase: number;
-  /** Amplitude of the red alarm pulse added on top of the base. */
-  keyIntensityAmp: number;
-
-  /** 0 = calm blue environment, 1 = full emergency red. */
-  red: number;
-  /** 0 = live trace, 1 = collapsed flatline. */
-  flat: number;
-  /** 0 = clean screen, 1 = full glitch band. */
-  glitch: number;
-  /** Multiplier on the monitor screen emissive (spikes with the alarm). */
+  /** Multiplier on the judge monitor screen emissive (rises with alert). */
   emissive: number;
   /** 0..1 opacity of the floating CODE HUD. */
   codeOpacity: number;
@@ -82,16 +82,16 @@ export function visualState(d: DeviceStatus, now: number = Date.now()): VisualTa
     lying,
     stale,
 
-    accentColor: crashed ? ALARM_RED : ACCENT_BLUE,
-    ledColor: d.compromised || alarm ? LED_RED : LED_GREEN,
+    alertLevel: crashed ? 1 : 0,
+    focusOn: crashed || alarm,
+    coveColor: crashed ? CORAL : ACCENT_BLUE,
+    ringColor: alarm ? CORAL : crashed ? SOFT_ALERT : ACCENT_BLUE,
+    inlayColor: crashed ? SOFT_ALERT : ACCENT_BLUE,
+    restDim: crashed ? 0.12 : 0,
+    pulseOn: crashed,
 
-    keyIntensityBase: alarm ? KEY_INTENSITY_ALARM_BASE : KEY_INTENSITY_CALM,
-    keyIntensityAmp: alarm ? KEY_INTENSITY_ALARM_AMP : 0,
-
-    red: alarm ? 1 : 0,
-    flat: alarm ? 1 : 0,
-    glitch: d.compromised ? 1 : 0,
-    emissive: alarm ? 2.5 : 1,
+    ledColor: d.compromised || alarm ? CORAL : MINT,
+    emissive: alarm ? 1.8 : 1,
     codeOpacity: alarm ? 1 : 0,
     // The bellows keep breathing only while the fan is physically on; the
     // moment it stops they freeze mid-stroke and slump.
