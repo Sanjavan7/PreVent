@@ -11,6 +11,8 @@
 // `runStageOrMock`), and without FACTORY_API_KEY `runDroid()` falls back to
 // its cached session. Set both env vars to exercise the real pipeline.
 
+import './env'; // loads repo-root .env BEFORE the SDK reads ANTHROPIC_API_KEY
+
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -179,7 +181,11 @@ async function runApplyStage(
     // instead of this timer once Dev 3's HTTP route exists.
     setTimeout(() => gate.resolve({ approved: true, approvedBy: 'dry-run-auto-approve' }), 50);
 
-    const decision = await canUseTool('apply_patch', { confirm: true }, { signal: new AbortController().signal });
+    const decision = await canUseTool('apply_patch', { confirm: true }, {
+      signal: new AbortController().signal,
+      toolUseID: 'dry-run',
+      requestId: 'dry-run',
+    });
     // `CanUseTool` may resolve `null` (fail-closed, out-of-band response) per
     // the SDK's own typing - we never do that here, but still guard it.
     if (!decision || decision.behavior !== 'allow') {
