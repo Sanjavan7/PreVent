@@ -89,6 +89,64 @@ export function PatientMonitor({ device }: Props) {
   const deviceRef = useRef<DeviceStatus>(device);
   deviceRef.current = device;
 
+  // --- Alarm audio ----------------------------------------------------
+  // Lazy AudioContext (browsers block audio until a user gesture; we unlock
+  // it on the first pointer/key event). We fire a hospital-style triple beep
+  // on the RISING edge of alarmActive and nothing else -- so the demo moment
+  // lands exactly once per crash.
+  const audioCtxRef = useRef<AudioContext | null>(null);
+  const prevAlarmRef = useRef<boolean>(device.alarmActive);
+
+  useEffect(() => {
+    const unlock = () => {
+      try {
+        if (!audioCtxRef.current) {
+          const Ctx =
+            window.AudioContext ||
+            (window as unknown as { webkitAudioContext?: typeof AudioContext })
+              .webkitAudioContext;
+          if (Ctx) audioCtxRef.current = new Ctx();
+        }
+        const ctx = audioCtxRef.current;
+        if (ctx && ctx.state === 'suspended') void ctx.resume();
+      } catch {
+        /* audio unsupported; silent is fine */
+      }
+    };
+    window.addEventListener('pointerdown', unlock);
+    window.addEventListener('keydown', unlock);
+    return () => {
+      window.removeEventListener('pointerdown', unlock);
+      window.removeEventListener('keydown', unlock);
+    };
+  }, []);
+
+  useEffect(() => {
+    const wasAlarming = prevAlarmRef.current;
+    prevAlarmRef.current = device.alarmActive;
+    if (!device.alarmActive || wasAlarming) return;
+    // Rising edge: three short 880 Hz sine beeps, 260 ms apart.
+    const ctx = audioCtxRef.current;
+    if (!ctx || ctx.state === 'closed') return;
+    if (ctx.state === 'suspended') void ctx.resume();
+    const now = ctx.currentTime;
+    for (let i = 0; i < 3; i++) {
+      const start = now + i * 0.26;
+      const dur = 0.17;
+      const osc = ctx.createOscillator();
+      osc.type = 'sine';
+      osc.frequency.value = 880;
+      const gain = ctx.createGain();
+      gain.gain.setValueAtTime(0, start);
+      gain.gain.linearRampToValueAtTime(0.28, start + 0.008);
+      gain.gain.setValueAtTime(0.28, start + dur - 0.03);
+      gain.gain.exponentialRampToValueAtTime(0.001, start + dur);
+      osc.connect(gain).connect(ctx.destination);
+      osc.start(start);
+      osc.stop(start + dur + 0.02);
+    }
+  }, [device.alarmActive]);
+
   useEffect(() => {
     const host = hostRef.current;
     if (!host) return;
@@ -162,6 +220,31 @@ export function PatientMonitor({ device }: Props) {
       // cleanly when HR changes.
       const phase = { ecg: 0, spo2: 0, resp: 0 };
       let vignetteAlpha = 0;
+      // Per-lane amplitude envelope (0 = flat, 1 = normal). Driven in the
+      // ticker so the crash and the restore ("exhale") feel organic rather
+      // than snap-cut.
+      const env = { ecg: 1, spo2: 1 };
+
+      // Big "CODE" overlay fades in on alarmActive.
+      const codeText = new Text({
+        text: '⚠ CODE',
+        style: {
+          fontFamily:
+            'ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace',
+          fontSize: 44,
+          fontWeight: '700',
+          fill: COLORS.danger,
+          letterSpacing: 6,
+        },
+      });
+      codeText.alpha = 0;
+      codeText.anchor.set(0.5);
+      overlay.addChild(codeText);
+      const positionCodeText = () => {
+        codeText.x = app.renderer.width / 2;
+        codeText.y = app.renderer.height / 2;
+      };
+      positionCodeText();
 
       const resizeBuffers = (width: number) => {
         const n = Math.max(2, Math.floor(width));
@@ -217,10 +300,12 @@ export function PatientMonitor({ device }: Props) {
         resizeBuffers(app.renderer.width);
         drawGrid();
         positionLabels();
+        positionCodeText();
       });
       resizeBuffers(app.renderer.width);
       drawGrid();
       positionLabels();
+      positionCodeText();
 
       // --- Simulation + draw tick --------------------------------------
       app.ticker.add(() => {
@@ -277,12 +362,22 @@ export function PatientMonitor({ device }: Props) {
           }
         }
 
+        // Envelope: ECG and SpO2 collapse to a flat line when the device
+        // admits the alarm, and swell back ("exhale") when it clears.
+        // Respiration is driven by its own fanOn logic above, so no envelope
+        // here -- we want the tiny mains hum visible when the fan stops.
+        const kEnv = Math.min(1, dtSec * (d.alarmActive ? 4 : 2));
+        const envTarget = d.alarmActive ? 0 : 1;
+        env.ecg += (envTarget - env.ecg) * kEnv;
+        env.spo2 += (envTarget - env.spo2) * kEnv;
+
         // Draw each lane. Y is centered in the lane; amplitude uses most of
         // the lane height with a margin so the line never clips.
         LANES.forEach((lane, laneIdx) => {
           const s = lanes[lane.key];
           const yCenter = laneIdx * laneH + laneH / 2;
-          const yAmp = laneH * 0.38;
+          const envMul = lane.key === 'resp' ? 1 : env[lane.key];
+          const yAmp = laneH * 0.38 * envMul;
           const g = s.g;
           g.clear();
           const n = s.buf.length;
@@ -304,11 +399,17 @@ export function PatientMonitor({ device }: Props) {
         });
 
         // Vignette: fade in when the alarm is actually firing, fade out when
-        // it clears. Keeps a smooth transition even if alarmActive toggles.
-        const targetA = d.alarmActive ? 0.22 : 0;
-        vignetteAlpha += (targetA - vignetteAlpha) * Math.min(1, dtSec * 4);
+        // it clears. Pulses slowly for dramatic effect.
+        const vignetteBase = d.alarmActive
+          ? 0.18 + 0.1 * Math.abs(Math.sin(performance.now() / 350))
+          : 0;
+        vignetteAlpha += (vignetteBase - vignetteAlpha) * Math.min(1, dtSec * 4);
         vignette.clear();
         vignette.rect(0, 0, w, h).fill({ color: COLORS.danger, alpha: vignetteAlpha });
+
+        // CODE overlay fades in with the alarm.
+        const codeTarget = d.alarmActive ? 0.9 : 0;
+        codeText.alpha += (codeTarget - codeText.alpha) * Math.min(1, dtSec * 3);
       });
     })();
 
