@@ -1,94 +1,82 @@
-// The ICU light rig (spec §4). Mounted ONCE with the HEALTHY values; the alarm
-// transition is a per-frame lerp of these same four light objects in
-// DeviceDriver (never a mount/unmount), so a crash never pops geometry or
-// reallocates shadow maps.
+// The BRIGHT ward light rig (spec §6). A daylit, peaceful "dollhouse" base:
+// a soft sky/ground hemisphere + a flat ambient lift + one warm directional
+// sun (the only shadow caster), over a fully OFFLINE white softbox environment
+// (drei <Environment> with <Lightformer> children -- NO HDR fetch, demo-safe
+// with no network).
 //
-// Environment: a fully offline, programmatic env map (drei <Environment> with
-// <Lightformer> children -- NO HDR fetch, demo-safe with no network) that gives
-// the chrome rails / IV pole / floor a faint blue reflection. Baked once
-// (frames={1}) and kept dim (environmentIntensity <= 0.6) so it never lifts the
-// pitch-black room.
-//
-// No device props -> memoized. Only the stable light refs flow in; DeviceDriver
-// owns every value after mount.
+// Mounted ONCE. The ambient + env are static and always carry a bright floor so
+// a crash NEVER darkens the hospital. The hemisphere and sun expose refs: on a
+// crash DeviceDriver dims them only ~12% so the rest of the ward gently recedes
+// while the judge focus spot rises -- the money moment reads by WARMTH + FOCUS,
+// never by going dark. The judge-room focus spotlight itself lives in JudgeRoom.
 
 import { memo } from 'react';
 import type { RefObject } from 'react';
-import type { AmbientLight, DirectionalLight, PointLight } from 'three';
+import type { DirectionalLight, HemisphereLight } from 'three';
 import { Environment, Lightformer } from '@react-three/drei';
+import { C } from './palette';
 
 interface Props {
-  ambientRef: RefObject<AmbientLight | null>;
-  rimRef: RefObject<DirectionalLight | null>;
-  keyRef: RefObject<PointLight | null>;
-  fillRef: RefObject<PointLight | null>;
+  hemiRef: RefObject<HemisphereLight | null>;
+  sunRef: RefObject<DirectionalLight | null>;
 }
 
-export const Lighting = memo(function Lighting({
-  ambientRef,
-  rimRef,
-  keyRef,
-  fillRef,
-}: Props) {
+export const Lighting = memo(function Lighting({ hemiRef, sunRef }: Props) {
   return (
     <>
-      {/* Near-black ambient so the room reads as pitch dark. */}
-      <ambientLight ref={ambientRef} intensity={0.06} color="#0a1420" />
+      {/* Sky/ground hemispheric fill -- the bright, peaceful base (dims ~12%). */}
+      <hemisphereLight ref={hemiRef} intensity={0.9} color={C.sky} groundColor={C.ground} />
 
-      {/* Cold blue directional rim from behind the bed. */}
+      {/* Flat ambient lift so no near face is crushed (static, never dimmed). */}
+      <ambientLight intensity={0.35} color={C.linen} />
+
+      {/* Warm hero sun (~4000K) -- the ONLY shadow caster. */}
       <directionalLight
-        ref={rimRef}
-        position={[-3, 2.4, -2.5]}
-        intensity={0.9}
-        color="#0097fe"
-      />
+        ref={sunRef}
+        position={[6, 11, 4]}
+        intensity={1.8}
+        color={C.sun}
+        castShadow
+        shadow-mapSize={[2048, 2048]}
+        shadow-bias={-0.0004}
+        shadow-normalBias={0.02}
+      >
+        <orthographicCamera attach="shadow-camera" args={[-14, 14, 9, -9, 1, 40]} />
+      </directionalLight>
 
-      {/* Monitor key light -- the hero. Co-located with the screen so the glow
-          reads as the room's dominant source. */}
-      <pointLight
-        ref={keyRef}
-        position={[0.9, 1.35, 0.15]}
-        intensity={2.4}
-        distance={4.5}
-        decay={2}
-        color="#0097fe"
-      />
-
-      {/* Faint camera-side fill so the near faces aren't fully crushed. */}
-      <pointLight
-        ref={fillRef}
-        position={[2.2, 1.6, 2.6]}
-        intensity={0.35}
-        distance={8}
-        decay={2}
-        color="#2b5f8a"
-      />
-
-      {/* Offline env map (no HDR fetch). Baked once; dim blue reflections. */}
-      <Environment frames={1} resolution={256} environmentIntensity={0.5}>
-        <color attach="background" args={['#02040a']} />
+      {/* Offline white softbox env -- no HDR/CDN. Baked once; soft reflections. */}
+      <Environment frames={1} resolution={256} environmentIntensity={0.85}>
+        <color attach="background" args={['#eef3f8']} />
         <Lightformer
           form="rect"
-          intensity={1.2}
-          color="#0097fe"
-          scale={[6, 6, 1]}
-          position={[-3, 3, -4]}
+          intensity={1.0}
+          color="#ffffff"
+          scale={[10, 10, 1]}
+          position={[0, 8, 0]}
+          target={[0, 0, 0]}
+        />
+        <Lightformer
+          form="rect"
+          intensity={0.5}
+          color="#eaf4ff"
+          scale={[8, 4, 1]}
+          position={[-6, 5, -4]}
           target={[0, 1, 0]}
         />
         <Lightformer
           form="rect"
           intensity={0.4}
-          color="#2b5f8a"
-          scale={[5, 5, 1]}
-          position={[4, 2.5, 4]}
+          color="#ffffff"
+          scale={[8, 4, 1]}
+          position={[6, 5, 4]}
           target={[0, 1, 0]}
         />
         <Lightformer
           form="ring"
           intensity={0.3}
-          color="#0097fe"
-          scale={[2, 2, 1]}
-          position={[0, 4, 0]}
+          color="#bfe4ff"
+          scale={[3, 3, 1]}
+          position={[0, 6, 0]}
           target={[0, 0, 0]}
         />
       </Environment>

@@ -40,13 +40,14 @@ export const CodeHud = memo(function CodeHud({
         style={{
           padding: '6px 18px',
           borderRadius: 8,
-          border: '1px solid rgba(255,45,58,0.8)',
-          background: 'rgba(40,4,6,0.72)',
-          color: '#ff5563',
+          border: '1px solid rgba(255,107,91,0.85)',
+          background: 'rgba(255,255,255,0.9)',
+          backdropFilter: 'blur(4px)',
+          color: '#ff6b5b',
           fontSize: 28,
           fontWeight: 800,
           letterSpacing: '0.18em',
-          textShadow: '0 0 14px rgba(255,45,58,0.9)',
+          boxShadow: '0 2px 16px rgba(255,107,91,0.3)',
         }}
       >
         CODE
@@ -56,7 +57,7 @@ export const CodeHud = memo(function CodeHud({
           marginTop: 6,
           fontSize: 11,
           letterSpacing: '0.24em',
-          color: '#ff8a93',
+          color: '#d9594b',
         }}
       >
         VENTILATOR STOPPED

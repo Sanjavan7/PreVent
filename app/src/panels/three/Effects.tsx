@@ -1,35 +1,38 @@
-// The single EffectComposer (spec §4). Exact order: Bloom -> ChromaticAberration
-// -> ToneMapping(ACES) -> Vignette -> Noise.
+// The single EffectComposer -- the MINIMAL bright stack (spec §6). Order:
+// N8AO (ambient occlusion, HIGH only) -> Bloom (selective, low) -> ToneMapping
+// (NEUTRAL). The old "dark horror" effects (ChromaticAberration / Vignette /
+// Noise) are deleted -- they fought the bright/peaceful look.
 //
-// Tone-mapping lives here ONCE, as the last HDR-stage effect: the Canvas is
-// `flat` (NoToneMapping) and the composer force-holds gl.toneMapping at
-// NoToneMapping for its lifetime, so the #0097FE emissive (toneMapped={false},
-// value > 1) survives untouched through Bloom into a HalfFloat buffer and only
-// then gets the filmic curve. That chain is what stops the blue washing out.
+// Tone-mapping is NEUTRAL (Khronos PBR Neutral), not ACES: it keeps whites white
+// and the #0097FE accent hue true, where ACES muddies the blue and darkens mids.
+// The Canvas is `flat` (NoToneMapping), so the composer owns the curve and the
+// emissive screens (toneMapped={false}, value > 1) survive untouched through
+// Bloom into a HalfFloat buffer before the NEUTRAL curve is applied.
 //
-// Bloom + ChromaticAberration take refs (via the shared SceneRefs bundle) so
-// DeviceDriver can spike bloom intensity and widen the aberration on a crash
-// from its one useFrame -- no React re-render. kernelSize is intentionally
-// omitted: with mipmapBlur the kernel is ignored and `radius` controls spread.
+// Bloom is selective + low (luminanceThreshold 1.0 -> only emissive screens /
+// the judge-room halo bloom) and takes a ref so DeviceDriver can nudge its
+// intensity on a crash from its one useFrame -- no React re-render.
 //
-// `tier` down-shifts cost without ever remounting the composer's core (Bloom +
-// ToneMapping + Vignette always present): ChromaticAberration and Noise drop
-// first, then multisampling and bloom quality. Dropping an effect nulls its ref,
-// which DeviceDriver null-checks.
+// N8AO is a standalone Pass (confirmed exported by @react-three/postprocessing
+// 3.2.2; `n8ao` 2.x is installed). It is mounted at HIGH only; PCSS +
+// ContactShadows already ground the scene, so dropping it on MED/LOW is safe.
+//
+// `tier` down-shifts cost without remounting the composer core (Bloom +
+// ToneMapping are always present): N8AO drops first, then multisampling.
+// `chromaRef` is kept in the prop shape for <Scene> compatibility but is no
+// longer wired to any effect (DeviceDriver null-checks it).
 
 import { memo } from 'react';
 import type { RefObject } from 'react';
 import { HalfFloatType } from 'three';
 import {
   Bloom,
-  ChromaticAberration,
   EffectComposer,
-  Noise,
+  N8AO,
   ToneMapping,
-  Vignette,
 } from '@react-three/postprocessing';
 import type { BloomEffect, ChromaticAberrationEffect } from 'postprocessing';
-import { BlendFunction, ToneMappingMode } from 'postprocessing';
+import { ToneMappingMode } from 'postprocessing';
 
 export type PerfTier = 'HIGH' | 'MED' | 'LOW';
 
@@ -39,45 +42,32 @@ interface Props {
   chromaRef: RefObject<ChromaticAberrationEffect | null>;
 }
 
-export const Effects = memo(function Effects({
-  tier,
-  bloomRef,
-  chromaRef,
-}: Props) {
-  const multisampling = tier === 'HIGH' ? 4 : tier === 'MED' ? 2 : 0;
-  const bloomIntensity = tier === 'LOW' ? 0.5 : tier === 'MED' ? 0.8 : 0.9;
-  const bloomRadius = tier === 'LOW' ? 0.5 : tier === 'MED' ? 0.65 : 0.7;
-  const chroma = tier === 'HIGH';
-  const noise = tier !== 'LOW';
+export const Effects = memo(function Effects({ tier, bloomRef }: Props) {
+  const multisampling = tier === 'LOW' ? 0 : 4;
 
   return (
     <EffectComposer multisampling={multisampling} frameBufferType={HalfFloatType}>
+      {tier === 'HIGH' && (
+        <N8AO
+          aoRadius={1.2}
+          distanceFalloff={1}
+          intensity={1.1}
+          color="#43566b"
+          quality="medium"
+          aoSamples={16}
+          denoiseSamples={4}
+          halfRes
+        />
+      )}
       <Bloom
         ref={bloomRef}
         mipmapBlur
-        luminanceThreshold={0.9}
-        luminanceSmoothing={0.08}
-        intensity={bloomIntensity}
-        radius={bloomRadius}
+        luminanceThreshold={1.0}
+        luminanceSmoothing={0.2}
+        intensity={0.35}
+        radius={0.6}
       />
-      {chroma && (
-        <ChromaticAberration
-          ref={chromaRef}
-          blendFunction={BlendFunction.NORMAL}
-          offset={[0.0006, 0.0006]}
-          radialModulation
-          modulationOffset={0.3}
-        />
-      )}
-      <ToneMapping mode={ToneMappingMode.ACES_FILMIC} />
-      <Vignette offset={0.28} darkness={0.9} />
-      {noise && (
-        <Noise
-          premultiply
-          blendFunction={BlendFunction.OVERLAY}
-          opacity={0.035}
-        />
-      )}
+      <ToneMapping mode={ToneMappingMode.NEUTRAL} />
     </EffectComposer>
   );
 });
