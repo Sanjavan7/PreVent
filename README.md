@@ -12,7 +12,7 @@ One shared `device_status` row drives **the physical hardware, the left patient 
 ## How each sponsor tech is used
 - **Claude (Anthropic) — Agent SDK:** the reasoning core. Scan triage, outcome judging, verification triage, with **visible streamed reasoning, stated uncertainty, and a real safety refusal** on the dashboard.
 - **Factory Droid (`@factory/droid-sdk`):** the autonomous **patch engineer** — triggered by the orchestrator (not a human) on the confirmed vuln, it edits the device-service repo and streams its **plan + real diff** to the dashboard, scoped so it cannot commit/push/deploy, gated by a human click.
-- **SpacetimeDB:** the real-time backbone — one reactive DB (tables + reducers + subscriptions) that the device service, both panels, and the serial bridge subscribe to; separation of duties is enforced in reducers via `ctx.sender`. (**Convex** is the warm fallback behind a `RealtimeBackend` abstraction.)
+- **SpacetimeDB:** the real-time backbone — one reactive DB (tables + reducers + subscriptions) that the device service, both panels, and the serial bridge subscribe to; separation of duties is enforced in reducers via `ctx.sender`. (a `RealtimeBackend` abstraction leaves room for a **Convex** fallback, but that adapter is dormant and unbuilt — see "Convex fallback" below.)
 - **Bitdeer AI Model Studio:** hosts the open model (`deepseek-ai/DeepSeek-V4.1-Flash`) that writes the proof-of-concept exploit — isolating the offensive-code model from the trust/decision model (a real separation of duties).
 - **NVD/CVE:** grounds the vulnerability in a real published advisory.
 
@@ -63,15 +63,18 @@ spacetime publish --module-path realtime/spacetimedb --server local prevent
 ### SpacetimeDB credit
 Redeem code `CALHACKS13` at https://spacetimedb.com/redeem for 100k TeV (a month of Pro).
 
-## Convex fallback (only if the SpacetimeDB TS loop trips the H13 gate)
-A Convex **cloud dev deployment** is already provisioned so the swap stays "one file":
+## Convex fallback — DORMANT, not a one-line flip
+This was scoped as a warm fallback but is **not built**, so it is **not** a drop-in swap today. Setting `VITE_REALTIME_BACKEND=convex` makes the app **fail loud on boot** (`main.tsx` refuses any backend other than `spacetimedb` or `mock`, rather than silently rendering a fake-live dashboard off the mock hook).
+- **What exists:** the client adapter in `realtime/src/backend/convex.ts`, a provisioned dev deployment, and the env placeholders below.
+- **What's missing:** the Convex server functions in `realtime/convex/` are **NOT written** (schema + per-table queries + per-reducer mutations with `ctx.auth.getUserIdentity()`). Building them is a real task, not a config flip, and only worth doing if we actually need the fallback (it forfeits the SpacetimeDB prize).
 ```
-VITE_REALTIME_BACKEND=convex           # <- only flip this line
+# These are placeholders for IF the Convex functions get built — the app will
+# NOT boot with convex until then.
+VITE_REALTIME_BACKEND=convex
 VITE_CONVEX_URL=https://spotted-kudu-58.convex.cloud
 ```
 - **Dashboard:** https://dashboard.convex.dev/t/sanjavan/prevent-dc2b7
 - **Project:** `sanjavan:prevent-dc2b7`, dev deployment `spotted-kudu-58` (US East)
-- **Status:** client adapter in `realtime/src/backend/convex.ts` is wired; **Convex server functions in `realtime/convex/` are NOT written yet** — Dev 3 will build them (schema + per-table queries + per-reducer mutations with `ctx.auth.getUserIdentity()`) **only if we actually need the fallback** (forfeits the SpacetimeDB prize). Until then this stays dormant.
 - No CLI needed by teammates. Owner (Dev 3) runs `npx convex login`, `npx convex deployment create ... --select` for provisioning; teammates just pull.
 
 ### Security loop (Dev 2) — runs headless, offline, with no API keys

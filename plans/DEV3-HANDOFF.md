@@ -56,9 +56,9 @@ wiring.
 
 | Surface | Current | Target |
 |---|---|---|
-| **Patch diff viewer** | Renders a canned CWE-306 diff from `SAMPLE_DIFF` constant in `DashboardPanel.tsx` | Subscribe to the `patch_attempts` table in `useRealtimeLive`, pass the newest row to `PatchDiffCard`, fetch the diff by `diffRef` from Dev 1's HTTP control server |
-| **APPROVE button** | Click handler is a no-op (`onApprove` prop is optional and unused) | Call Dev 1's HTTP approval endpoint (`agents/src/controlServer.ts`) with the current `patch_attempts.id` so `canUseTool` resolves |
-| **"deliver-agent" / "scan-agent" names** | Hardcoded strings in `seed-demo.sh` | Will come from the real orchestrator's `update_agent_status` calls — no app change needed |
+| **Patch diff viewer** | Renders a canned CWE-306 diff from `SAMPLE_DIFF` constant in `DashboardPanel.tsx` | Subscribe to the `patch_attempts` table in `useRealtimeLive`, pass the newest row to `PatchDiffCard`. NOTE: on the live producer (`agents/src/orchestrator.ts`), `patch_attempts.diffRef` currently holds the **Droid session id**, not diff text, and the control server has **no `/diff` route** — so rendering a real diff needs a producer/route change first, not just a fetch. |
+| **APPROVE button** | Click handler is a no-op (`onApprove` prop is optional and unused) | POST to Dev 1's control server `/approve` (`agents/src/controlServer.ts`). It takes **no `patchId`** — it settles whichever human gate is currently pending (optional `{approvedBy}` body); there is one in-flight patch per run. |
+| **Agent-row names** | `seed-demo.sh` now passes the BARE stage name (`scan`/`deliver`/…) as `update_agent_status`'s `agentName` so it updates the init-seeded row instead of inserting a duplicate | Same convention from the real orchestrator's `update_agent_status` calls — no app change needed |
 | **Event log pagination** | Renders all rows (max-height scroll) | Fine for the demo; if the loop runs long, cap to last 50 rows |
 | **FDA receipt device id** | Hardcoded "Model VENT-SIM / Lab unit #0001" | Pull from `device_status.id` once we add a serial field |
 
@@ -93,7 +93,7 @@ Listed in order of pitch impact:
 VITE_REALTIME_BACKEND=spacetimedb
 VITE_SPACETIMEDB_URI=wss://maincloud.spacetimedb.com   # or ws://localhost:3000 for solo dev
 VITE_SPACETIMEDB_MODULE=prevent
-VITE_CONVEX_URL=https://spotted-kudu-58.convex.cloud   # fallback, dormant until H13 gate
+VITE_CONVEX_URL=https://spotted-kudu-58.convex.cloud   # placeholder only; convex is UNBUILT — the app fails loud on VITE_REALTIME_BACKEND=convex (see README)
 ```
 
 ```bash
@@ -121,7 +121,7 @@ spacetime publish --module-path realtime/spacetimedb --server maincloud prevent
 
 1. **Verify the live chain**: start the app, run Dev 1's orchestrator against the live Maincloud module (`pnpm --filter @prevent/agents <bench or run>`), and watch the dashboard react in real time. First end-to-end test exposes any contract drift fast.
 2. **Wire APPROVE** to Dev 1's HTTP control server so the human gate becomes a real approval, not a cosmetic click.
-3. **Swap the canned patch diff** for the live `patch_attempts.diffRef` once Dev 1 is writing those rows.
+3. **Swap the canned patch diff** for a live one — but first coordinate with Dev 1: `patch_attempts.diffRef` currently holds the Droid session id (not diff text) and there's no `/diff` route to fetch it by, so this needs a producer/route change, not just a subscription.
 4. **(Stretch) 3D fleet view** — only after 1–3 are solid; it is the single highest-wow stretch and the plan calls it out as cuttable.
 5. **Backup demo video** (OBS Window Capture) — Sat night, before anyone sleeps.
 6. **Make the repo PUBLIC** right before Devpost submission (hard deadline Sun 9:00 AM PDT).
