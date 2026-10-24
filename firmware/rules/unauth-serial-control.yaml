@@ -1,0 +1,29 @@
+# PreVent — firmware static rule (Dev 2 SCAN target #2: the hardware code).
+#
+# The UNO firmware applies inbound serial STATE frames straight to the fan
+# actuator (driveFan) and the vitals/alarm display with NO authentication or
+# integrity check on the serial/command link. Whoever can write to that link
+# controls the ventilator and can falsify what the device shows — the
+# device-side analog of CVE-2019-6538 (unauthenticated device control).
+#
+# Scoped to *.ino and matched with a regex so it is robust across Arduino
+# toolchains (semgrep's generic mode scans any file regardless of extension).
+rules:
+  - id: firmware-unauth-serial-control
+    languages: [generic]
+    severity: ERROR
+    message: >-
+      Inbound serial STATE frames are applied to the fan actuator and the vitals
+      display with no authentication or integrity check on the control link
+      (CWE-306). Any party able to write to the device's serial/command channel
+      can stop the ventilator fan or falsify the displayed vitals and alarm.
+      Device-side analog of CVE-2019-6538 (unauthenticated device control).
+    metadata:
+      cwe: "CWE-306: Missing Authentication for Critical Function"
+      cveRef: "CVE-2019-6538"
+      references:
+        - https://nvd.nist.gov/vuln/detail/CVE-2019-6538
+    paths:
+      include:
+        - "*.ino"
+    pattern-regex: 'void\s+handleState\s*\('

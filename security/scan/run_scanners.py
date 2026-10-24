@@ -38,6 +38,9 @@ REPO_ROOT = SECURITY_DIR.parent
 # paths run_scanners() will look for once it exists.
 DEVICE_SERVICE_DIR = REPO_ROOT / "device-service"
 SEMGREP_RULES_DIR = DEVICE_SERVICE_DIR / "rules"
+# SCAN target #2: the hardware firmware (its own custom Semgrep ruleset).
+FIRMWARE_DIR = REPO_ROOT / "firmware"
+FIRMWARE_RULES_DIR = FIRMWARE_DIR / "rules"
 
 DEVICE_SERVICE_URL = __import__("os").environ.get("DEVICE_SERVICE_URL", "http://127.0.0.1:8071")
 
@@ -169,9 +172,74 @@ def run_bandit(device_service_dir: Path = DEVICE_SERVICE_DIR) -> list[ScannerFin
 
 
 def run_scanners(device_service_dir: Path = DEVICE_SERVICE_DIR, rules_dir: Path = SEMGREP_RULES_DIR) -> dict[str, list[ScannerFinding]]:
+    """Back-compat: the server-only, tool-aggregated view used by the classic
+    single-vuln loop + the existing tests. The multi-agent pipeline uses
+    run_scan_agents() instead."""
     return {
         "semgrep": run_semgrep(device_service_dir, rules_dir),
         "bandit": run_bandit(device_service_dir),
+    }
+
+
+class ScanAgent(TypedDict):
+    id: int            # 1..N — stable spawn order (the "agents spawning" beat)
+    agentId: str       # e.g. 'semgrep/device-service'
+    tool: str          # 'semgrep' | 'bandit'
+    target: str        # 'device-service' (server) | 'firmware' (hardware)
+    language: str      # what the agent is competent to read
+    findings: list[ScannerFinding]
+
+
+# The scanner fleet: {semgrep, bandit} x {server, firmware} = 4 agents.
+# agents != LLMs — each is a deterministic single-purpose recon agent. Bandit is
+# a Python linter, so on the C/C++ firmware it is honestly empty (no jurisdiction);
+# Semgrep is cross-language and covers both. Each entry is (tool, target, language,
+# target_dir, rules_dir|None).
+_SCAN_FLEET = [
+    ("semgrep", "device-service", "python",         DEVICE_SERVICE_DIR, SEMGREP_RULES_DIR),
+    ("bandit",  "device-service", "python",         DEVICE_SERVICE_DIR, None),
+    ("semgrep", "firmware",       "generic (c/c++)", FIRMWARE_DIR,       FIRMWARE_RULES_DIR),
+    ("bandit",  "firmware",       "python",          FIRMWARE_DIR,       None),
+]
+
+
+def run_scan_agents(*, include_firmware: bool = True) -> dict[str, Any]:
+    """Run SCAN as a fleet of independent scanner agents (the "four agents
+    spawn" beat). Returns the per-agent breakdown, a globally-id'd flat findings
+    list, and tool-aggregated views (semgrep/bandit) for back-compat with
+    run_scanners(). Every agent is a real scanner invocation over a real target."""
+    fleet = _SCAN_FLEET if include_firmware else _SCAN_FLEET[:2]
+
+    agents: list[ScanAgent] = []
+    for i, (tool, target, language, target_dir, rules_dir) in enumerate(fleet, start=1):
+        if tool == "semgrep":
+            found = run_semgrep(target_dir, rules_dir) if rules_dir else []
+        else:
+            found = run_bandit(target_dir)
+        for f in found:
+            f["target"] = target  # tag provenance (server vs hardware)
+        agents.append(
+            {
+                "id": i,
+                "agentId": f"{tool}/{target}",
+                "tool": tool,
+                "target": target,
+                "language": language,
+                "findings": found,
+            }
+        )
+
+    flat: list[ScannerFinding] = []
+    for a in agents:
+        flat.extend(a["findings"])
+    for gid, f in enumerate(flat, start=1):
+        f["id"] = gid  # globally unique id across all agents (for fan-out mapping)
+
+    return {
+        "agents": agents,
+        "findings": flat,
+        "semgrep": [f for f in flat if f["scanner"] == "semgrep"],
+        "bandit": [f for f in flat if f["scanner"] == "bandit"],
     }
 
 
