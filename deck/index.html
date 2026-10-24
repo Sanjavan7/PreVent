@@ -28,6 +28,7 @@
 
   --f-sans:  "Geist", -apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif;
   --f-mono:  "Geist Mono", "SF Mono", ui-monospace, Menlo, monospace;
+  --f-serif: "Fraunces", "Times New Roman", Georgia, serif;
 
   --ease:    cubic-bezier(.2, .8, .2, 1);
   --col:     1200px;
@@ -120,73 +121,185 @@ section { position: relative; min-height: 100vh; padding: 130px 32px 100px; }
 .r.d4 { transition-delay: 360ms; }
 .r.d5 { transition-delay: 500ms; }
 
-/* ---------- HERO (section #hero) ---------- */
-#hero {
-  min-height: 100vh;
-  display: grid; place-items: center;
-  padding: 0 32px;
-  overflow: hidden;
-}
-#hero .inner { text-align: center; position: relative; z-index: 2; width: 100%; }
-#hero h1 {
-  font-size: clamp(60px, 11vw, 180px);
-  line-height: .92; letter-spacing: -0.05em;
-  font-weight: 500; margin: 0;
-  font-feature-settings: "ss01", "cv11";
-}
-#hero h1 .lie {
-  color: var(--red);
-  font-style: italic;
-  font-weight: 400;
-  letter-spacing: -0.045em;
-}
-#hero .sub {
-  margin: 44px auto 0;
-  max-width: 760px;
-  font-size: clamp(16px, 1.6vw, 20px);
-  color: var(--ink-2);
-  line-height: 1.55;
-}
-#hero .sub em { color: var(--ink); font-style: normal; font-weight: 500; }
-#hero .chips {
-  display: flex; justify-content: center; gap: 10px; margin-top: 44px;
-  flex-wrap: wrap;
-}
-#hero .chip {
-  font-family: var(--f-mono); font-size: 11px; letter-spacing: .18em; text-transform: uppercase;
-  color: var(--ink-dim); border: 1px solid var(--rule-strong);
-  border-radius: 999px; padding: 8px 14px;
-  display: inline-flex; align-items: center; gap: 8px;
-}
-#hero .chip.hot { color: var(--red); border-color: rgba(255,45,74,.35); background: var(--red-dim); }
-#hero .chip.hot .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--red); }
+/* ---------- HERO · a photograph of a printed newspaper on a dark desk ---------- */
 
-/* The ECG line in the hero background */
-.ecg-hero {
-  position: absolute; inset: 0; z-index: 1; pointer-events: none;
+/* Newsprint colors (independent of the dark deck palette) */
+#hero {
+  --paper:   #ECE4D1;    /* warm newsprint cream */
+  --paper-2: #E2D9C2;    /* darker fold shade */
+  --ink:     #1A1612;    /* warm near-black ink */
+  --ink-2:   #4A423A;    /* mid-grey ink */
+  --ink-dim: #80766A;    /* light caption grey */
+  --red-ink: #B8252E;    /* muted newsprint red */
+  --rule:    rgba(26,22,18,0.14);
+  --rule-strong: rgba(26,22,18,0.32);
+
+  min-height: 100vh;
+  padding: 128px 40px 90px;
   display: grid; place-items: center;
-  mask-image: linear-gradient(90deg, transparent 0%, #000 10%, #000 90%, transparent 100%);
+  background:
+    radial-gradient(1200px 700px at 50% 30%, rgba(255,255,255,0.03), transparent 65%),
+    radial-gradient(1800px 1200px at 50% 110%, rgba(255,45,74,0.04), transparent 65%),
+    linear-gradient(180deg, #0A0A0C 0%, #050506 100%);
+  position: relative; overflow: hidden;
 }
-.ecg-hero svg { width: 100%; height: 180px; display: block; }
+
+/* The physical newspaper sheet. Tilt + shadow + grain. */
+#hero .paper {
+  position: relative; z-index: 2;
+  width: min(1120px, 92vw);
+  background: var(--paper);
+  color: var(--ink);
+  padding: 60px 68px 72px;
+  transform: perspective(2400px) rotateX(1.6deg) rotateZ(-0.45deg);
+  transform-origin: 50% 100%;
+  box-shadow:
+    0 2px 0 rgba(0,0,0,0.08),
+    0 20px 40px -10px rgba(0,0,0,0.55),
+    0 60px 120px -40px rgba(0,0,0,0.75),
+    0 90px 180px -60px rgba(0,0,0,0.6);
+}
+
+/* Paper grain + fold shade overlay, non-interactive */
+#hero .paper::before {
+  content: ""; position: absolute; inset: 0; pointer-events: none;
+  opacity: .55; mix-blend-mode: multiply;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='300' height='300'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.95' numOctaves='2' seed='7'/><feColorMatrix values='0 0 0 0 0.08  0 0 0 0 0.06  0 0 0 0 0.05  0 0 0 0.18 0'/></filter><rect width='100%25' height='100%25' filter='url(%23n)'/></svg>");
+}
+/* Soft horizontal fold crease */
+#hero .paper::after {
+  content: ""; position: absolute; inset: 0; pointer-events: none;
+  background:
+    linear-gradient(180deg, transparent 48%, rgba(26,22,18,.08) 50%, transparent 52%),
+    linear-gradient(90deg, rgba(26,22,18,.08) 0%, transparent 6%, transparent 94%, rgba(26,22,18,.08) 100%);
+  mix-blend-mode: multiply;
+}
+
+/* Masthead inside the paper */
+#hero .masthead {
+  display: grid; grid-template-columns: 1fr auto 1fr;
+  align-items: baseline; gap: 20px;
+  padding: 0 0 14px;
+  border-bottom: 2px solid var(--ink);
+  font-family: var(--f-mono); font-size: 10px; letter-spacing: .22em;
+  text-transform: uppercase; color: var(--ink-2);
+}
+#hero .masthead .left  { text-align: left; }
+#hero .masthead .right { text-align: right; }
+#hero .masthead .nameplate {
+  font-family: var(--f-serif); font-style: normal; font-weight: 900;
+  font-size: clamp(26px, 3vw, 40px); line-height: 1;
+  letter-spacing: 0.005em; text-transform: none; color: var(--ink);
+  font-variation-settings: "opsz" 48;
+}
+#hero .masthead .nameplate em { font-style: italic; color: var(--red-ink); font-weight: 400; }
+
+/* Thin rule under the masthead for the double-line newspaper look */
+#hero .doubleline {
+  height: 2px; background: transparent;
+  border-bottom: 1px solid var(--ink);
+  margin: 3px 0 24px;
+}
+
+/* Kicker */
+#hero .kicker {
+  font-family: var(--f-mono); font-size: 11px; letter-spacing: .3em;
+  text-transform: uppercase; color: var(--red-ink);
+  display: inline-flex; align-items: center; gap: 10px;
+}
+#hero .kicker::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--red-ink); }
+
+/* Headline */
+#hero h1 {
+  margin: 18px 0 0;
+  font-family: var(--f-serif);
+  font-weight: 900; font-style: normal;
+  font-size: clamp(44px, 6.6vw, 108px);
+  line-height: .93; letter-spacing: -0.028em;
+  font-variation-settings: "opsz" 144, "SOFT" 0;
+  color: var(--ink);
+  max-width: 1000px;
+}
+#hero h1 em {
+  font-style: italic; color: var(--red-ink); font-weight: 400;
+  font-variation-settings: "opsz" 144, "SOFT" 100;
+}
+
+/* Deck */
+#hero .deck {
+  margin: 24px 0 0; max-width: 920px;
+  font-family: var(--f-serif); font-weight: 400; font-style: italic;
+  font-size: clamp(18px, 1.8vw, 24px); line-height: 1.42;
+  color: var(--ink-2);
+  padding: 18px 0 20px;
+  border-top: 1px solid var(--rule-strong);
+  border-bottom: 1px solid var(--rule);
+}
+#hero .deck em { color: var(--ink); font-style: italic; }
+
+/* Byline */
+#hero .byline {
+  margin-top: 18px;
+  display: flex; gap: 24px; flex-wrap: wrap; align-items: baseline;
+  font-family: var(--f-mono); font-size: 10.5px; letter-spacing: .2em;
+  text-transform: uppercase; color: var(--ink-dim);
+}
+#hero .byline b { color: var(--ink); font-weight: 500; }
+
+/* Lede columns */
+#hero .columns {
+  margin-top: 32px;
+  columns: 2; column-gap: 44px; column-rule: 1px solid var(--rule);
+  font-family: var(--f-serif); font-weight: 400;
+  font-size: 15.5px; line-height: 1.55; color: var(--ink);
+  max-width: 1000px;
+}
+#hero .columns p { margin: 0 0 14px; break-inside: avoid; text-align: justify; hyphens: auto; }
+#hero .columns p:first-child::first-letter {
+  font-family: var(--f-serif); font-weight: 900; font-style: normal;
+  font-size: 4.6em; line-height: .88; float: left;
+  margin: 2px 10px -6px 0; color: var(--red-ink);
+  font-variation-settings: "opsz" 144;
+}
+#hero .columns b { color: var(--ink); font-weight: 700; }
+#hero .columns em { color: var(--red-ink); font-style: italic; font-weight: 400; }
+
+/* Caption below the paper, like a museum tag */
+#hero .caption {
+  position: relative; z-index: 2;
+  margin: 36px auto 0;
+  max-width: 820px; text-align: center;
+  font-family: var(--f-mono); font-size: 10.5px; letter-spacing: .22em;
+  text-transform: uppercase; color: #777779;
+}
+#hero .caption b { color: #BABABB; font-weight: 400; }
+
+/* ECG waveform — a faint pulse under the paper, outside its tilt */
+.ecg-hero {
+  position: absolute; left: 0; right: 0; bottom: 58px; z-index: 1; pointer-events: none;
+  mask-image: linear-gradient(90deg, transparent 0%, #000 15%, #000 85%, transparent 100%);
+  opacity: .36;
+}
+.ecg-hero svg { width: 100%; height: 90px; display: block; }
 .ecg-hero .trace {
-  fill: none; stroke: var(--red); stroke-width: 1.6;
-  filter: drop-shadow(0 0 8px rgba(255,45,74,.55));
+  fill: none; stroke: #FF2D4A; stroke-width: 1.2;
+  filter: drop-shadow(0 0 6px rgba(255,45,74,.55));
   stroke-dasharray: 4000; stroke-dashoffset: 4000;
-  animation: ecgDraw 3.6s var(--ease) 400ms forwards, ecgPulse 2.6s linear 4s infinite;
+  animation: ecgDraw 3.6s var(--ease) 600ms forwards;
 }
 @keyframes ecgDraw { to { stroke-dashoffset: 0; } }
-@keyframes ecgPulse { 0%, 100% { opacity: 1; } 50% { opacity: .4; } }
 
-/* Scroll cue */
+/* Scroll / arrow cue */
 .scroll-cue {
-  position: absolute; left: 50%; bottom: 32px; transform: translateX(-50%);
+  position: absolute; left: 50%; bottom: 22px; transform: translateX(-50%);
   font-family: var(--f-mono); font-size: 10.5px; letter-spacing: .3em;
-  text-transform: uppercase; color: var(--ink-dim);
-  display: flex; flex-direction: column; align-items: center; gap: 10px;
+  text-transform: uppercase; color: #777779;
+  display: flex; align-items: center; gap: 14px; z-index: 3;
 }
-.scroll-cue .line { width: 1px; height: 36px; background: linear-gradient(180deg, var(--ink-dim), transparent); animation: fall 2s var(--ease) infinite; }
-@keyframes fall { 0% { transform: scaleY(0); transform-origin: top; }
-                  100% { transform: scaleY(1); transform-origin: top; } }
+.scroll-cue .key {
+  border: 1px solid #2B2B2E; border-radius: 3px;
+  padding: 2px 7px; color: #BABABB; letter-spacing: 0;
+}
 
 /* ---------- THE LIE (section #lie) ---------- */
 #lie { background: var(--bg); }
@@ -514,7 +627,7 @@ section { position: relative; min-height: 100vh; padding: 130px 32px 100px; }
   <div class="logo">PreVent</div>
   <div class="meta">
     <span>Cal Hacks 13.0 · Oct 2026</span>
-    <span><b>v4</b> · one scroll</span>
+    <span><b>←</b> <b>→</b> navigate · <b>space</b> next · <b>1-9</b> jump</span>
   </div>
 </nav>
 
@@ -531,32 +644,60 @@ section { position: relative; min-height: 100vh; padding: 130px 32px 100px; }
 </aside>
 
 <!-- =============================================================
-     HERO
+     HERO · newspaper article treatment
      ============================================================= -->
 <section id="hero">
   <div class="ecg-hero" aria-hidden="true">
     <svg viewBox="0 0 1600 180" preserveAspectRatio="none">
-      <!-- One ECG waveform that spans the width. QRS complex repeating. -->
       <path class="trace" d="M0 90 L140 90 L160 90 L170 70 L180 110 L186 50 L192 130 L200 90 L350 90 L380 90 L390 80 L400 100 L500 90 L540 90 L560 70 L570 110 L576 50 L582 130 L590 90 L740 90 L780 90 L790 80 L800 100 L900 90 L940 90 L960 70 L970 110 L976 50 L982 130 L990 90 L1140 90 L1180 90 L1190 80 L1200 100 L1300 90 L1340 90 L1360 70 L1370 110 L1376 50 L1382 130 L1390 90 L1600 90"/>
     </svg>
   </div>
 
-  <div class="inner">
-    <div class="r in">
-      <h1>The device<br>will <span class="lie">lie</span> to the doctor.</h1>
-    </div>
-    <p class="sub r in d1">
-      PreVent is a pipeline of AI agents that <em>finds</em> the vulnerability, <em>proves</em> it with a working exploit,
-      <em>writes</em> the fix, and brings the device back online — every step visible, every change signed off by a human.
-    </p>
-    <div class="chips r in d2">
-      <span class="chip hot"><i class="dot"></i>Live demo in 90 seconds</span>
-      <span class="chip">Autonomous medical-device security</span>
-      <span class="chip">Human in the loop</span>
-    </div>
-  </div>
+  <article class="paper r in">
+    <!-- Masthead -->
+    <header class="masthead">
+      <span class="left">Vol. 1 · No. 42</span>
+      <span class="nameplate">The <em>Dispatch</em></span>
+      <span class="right">Health &amp; Security · Oct 2026</span>
+    </header>
+    <div class="doubleline"></div>
 
-  <div class="scroll-cue"><span>Scroll</span><span class="line"></span></div>
+    <!-- Kicker -->
+    <div class="kicker">Hospital cyberattacks · investigation</div>
+
+    <!-- Headline -->
+    <h1>
+      The device told the doctor<br>
+      the patient was fine.<br>
+      <em>The patient was not.</em>
+    </h1>
+
+    <!-- Deck -->
+    <p class="deck">
+      A new class of medical-device attack hides the alarm while the harm continues.
+      Hospitals have no tool that <em>finds, writes, and verifies the fix</em> at scale.
+      PreVent is the one we're shipping this week.
+    </p>
+
+    <!-- Byline -->
+    <div class="byline">
+      <span>By <b>The PreVent Team</b></span>
+      <span>San Francisco · Cal Hacks 13.0</span>
+      <span>Oct 24 · 2026</span>
+    </div>
+
+    <!-- Lede columns -->
+    <div class="columns">
+      <p>In 2025 the FBI's Internet Crime Complaint Center recorded <b>460 cyberattacks against US hospitals</b>, nearly double the 249 counted two years earlier. Industry fleet surveys put the number of connected devices per bed between ten and fifteen, and <em>roughly half of them carry a critical vulnerability</em> that is already published and known.</p>
+      <p>The patch exists. Nobody writes it, nobody times the fix, and nobody proves the fix worked. FDA §524B, in effect since 2023, now makes a repeatable find-and-fix process a condition of clearing a cyber device for market — but the tooling to produce one, at device pace, still does not exist on the floor.</p>
+    </div>
+  </article>
+
+  <p class="caption r in d2">
+    <b>Fig. 1</b> · PreVent · Cal Hacks 13.0 · a dispatch from the floor of the demo
+  </p>
+
+  <div class="scroll-cue"><span class="key">←</span><span class="key">→</span><span>navigate</span></div>
 </section>
 
 <!-- =============================================================
@@ -879,6 +1020,39 @@ section { position: relative; min-height: 100vh; padding: 130px 32px 100px; }
   }
   window.addEventListener('scroll', onScroll, { passive: true });
   onScroll();
+
+  // Arrow-key / space / number-key navigation between sections.
+  // The page is scrollable AND slide-navigable. Arrows snap between sections.
+  const sectionList = Array.from(document.querySelectorAll('section[id]'));
+  function currentIdx() {
+    const y = window.scrollY + window.innerHeight * 0.35;
+    let idx = 0;
+    for (let i = 0; i < sectionList.length; i++) {
+      if (sectionList[i].offsetTop <= y) idx = i;
+    }
+    return idx;
+  }
+  function jump(idx) {
+    idx = Math.max(0, Math.min(sectionList.length - 1, idx));
+    sectionList[idx].scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+  document.addEventListener('keydown', (e) => {
+    // Ignore keystrokes typed into inputs or when a modifier is held.
+    if (e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA')) return;
+    if (e.metaKey || e.ctrlKey || e.altKey) return;
+
+    if (e.key === 'ArrowRight' || e.key === ' ' || e.key === 'PageDown') {
+      e.preventDefault(); jump(currentIdx() + 1);
+    } else if (e.key === 'ArrowLeft' || e.key === 'PageUp') {
+      e.preventDefault(); jump(currentIdx() - 1);
+    } else if (e.key === 'Home') {
+      e.preventDefault(); jump(0);
+    } else if (e.key === 'End') {
+      e.preventDefault(); jump(sectionList.length - 1);
+    } else if (/^[1-9]$/.test(e.key)) {
+      e.preventDefault(); jump(Number(e.key) - 1);
+    }
+  });
 
   // Reveal-on-view: fades + translates every .r element the first time it enters.
   const reveal = new IntersectionObserver((entries) => {
