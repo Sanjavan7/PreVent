@@ -22,6 +22,9 @@ export const C = {
 
   // neutrals / whites
   wall: 0xf7fafc,
+  // warm off-white/beige for the room DIVIDER WALLS so they read as solid 3D
+  // volumes against the bright background and the near-white floor.
+  wallWarm: 0xece6dc,
   floor: 0xeceff3,
   trim: 0xdfe6ee,
   linen: 0xffffff,

@@ -116,13 +116,10 @@ export const MOCK_EXPLOIT_RUNS: ExploitRun[] = [
   },
 ];
 
-/** The Factory Droid patch awaiting human sign-off. `diffRef` carries an inline
- *  unified diff adding the missing auth check to POST /device/command. */
-export const MOCK_PATCH_ATTEMPTS: PatchAttempt[] = [
-  {
-    id: 1,
-    findingId: 2,
-    diffRef: `--- a/device-service/app.py
+/** Inline unified diff Factory Droid proposes: adds the missing auth check and
+ *  drops untrusted reportedOverrides on POST /device/command. Shared by the
+ *  static fixture below and the scripted mock demo director. */
+export const DEMO_PATCH_DIFF = `--- a/device-service/app.py
 +++ b/device-service/app.py
 @@ -38,7 +38,12 @@ app = Flask(__name__)
  @app.route("/device/command", methods=["POST"])
@@ -134,7 +131,15 @@ export const MOCK_PATCH_ATTEMPTS: PatchAttempt[] = [
 +    payload = request.get_json(force=True)
 +    payload.pop("reportedOverrides", None)
      action = payload.get("action")
-     return apply_command(action, payload)`,
+     return apply_command(action, payload)`;
+
+/** The Factory Droid patch awaiting human sign-off. `diffRef` carries an inline
+ *  unified diff adding the missing auth check to POST /device/command. */
+export const MOCK_PATCH_ATTEMPTS: PatchAttempt[] = [
+  {
+    id: 1,
+    findingId: 2,
+    diffRef: DEMO_PATCH_DIFF,
     droidSession: 'droid-7f3a1c',
     proposedAt: 4,
     humanApproved: true,

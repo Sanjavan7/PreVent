@@ -97,6 +97,7 @@ export function useRealtimeLive(): RealtimeState {
       irEvents,
       mockExploited: false,
       setMockExploited: NOOP,
+      approve: NOOP,
     };
   }, [
     deviceRows,

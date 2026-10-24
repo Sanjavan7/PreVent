@@ -41,8 +41,10 @@ interface Placed {
 export const RoomShell = memo(function RoomShell({
   size = 4,
   wallHeight = 1.3,
-  wallThickness = 0.12,
-  wallColor = C.wall,
+  // Thick warm dividers so every room reads as a solid 3D volume; floor stays
+  // light (floorColor defaults near-white) for the bright dollhouse look.
+  wallThickness = 0.24,
+  wallColor = C.wallWarm,
   floorColor = C.wall,
   children,
 }: {
@@ -135,6 +137,39 @@ export const Bed = memo(function Bed({ position = [0, 0, 0], rotation }: Placed)
         h('cylinderGeometry', { args: [0.018, 0.018, 1.5, 10] }),
         chrome(),
       ),
+    ),
+  ]);
+});
+
+// --- RestingPatient: a calm low-poly figure under a sheet, resting on a bed ----
+// Matches the judge patient's silhouette (head toward -Z) but is pure static
+// set-dressing -- no breathing ref -- so every generic room gets "one patient
+// per room." Place it at the room's bed anchor; the Bed already owns the pillow.
+export const RestingPatient = memo(function RestingPatient({
+  position = [0, 0, 0],
+  rotation,
+}: Placed) {
+  return h('group', { position, rotation }, [
+    // Torso mound under the sheet (bright linen).
+    h(
+      'mesh',
+      { key: 'torso', position: [0, 0.6, 0.0], castShadow: true },
+      h('boxGeometry', { args: [0.46, 0.16, 0.95] }),
+      matte(C.linen, 0.95),
+    ),
+    // Blanket over the lower body.
+    h(
+      'mesh',
+      { key: 'blanket', position: [0, 0.58, 0.45] },
+      h('boxGeometry', { args: [0.6, 0.1, 1.0] }),
+      matte(C.linen, 0.95),
+    ),
+    // Warm skin head on the pillow (head toward -Z).
+    h(
+      'mesh',
+      { key: 'head', position: [0, 0.66, -0.74], castShadow: true },
+      h('sphereGeometry', { args: [0.12, 20, 16] }),
+      matte(C.skin, 0.8),
     ),
   ]);
 });

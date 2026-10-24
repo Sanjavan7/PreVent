@@ -1,6 +1,6 @@
-// The bright cutaway ward (spec §3/§4): the ground slab, the corridor, the four
-// patient rooms (three generic + the one highlighted JudgeRoom), the nurse
-// station, and the dotted plants. Wrapped by <Center disableY>/<Bounds> in
+// The bright cutaway ward (spec §3/§4): the ground slab, the central corridor,
+// the eight patient rooms in two rows (seven generic + the one highlighted
+// JudgeRoom), and the dotted plants. Wrapped by <Center disableY>/<Bounds> in
 // <Scene> so it auto-frames into the half-screen panel from the dollhouse-iso
 // orbit.
 //
@@ -16,7 +16,6 @@ import type { SceneRefs } from '../sceneRefs';
 import { Room } from './Room';
 import { JudgeRoom } from './JudgeRoom';
 import { Corridor } from './Corridor';
-import { NurseStation } from './NurseStation';
 import { Plant } from './furniture';
 
 interface Props {
@@ -48,11 +47,9 @@ export const Ward = memo(function Ward({ layout, refs, screenTex }: Props) {
             refs={refs}
           />
         ) : (
-          <Room key={room.id} center={room.center} />
+          <Room key={room.id} center={room.center} rotY={room.rotY} />
         ),
       )}
-
-      <NurseStation />
 
       {layout.plants.map((p, i) => (
         <Plant key={`plant-${i}`} position={p} />

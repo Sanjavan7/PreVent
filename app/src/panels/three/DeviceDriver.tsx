@@ -32,8 +32,9 @@ import type { SceneRefs } from './sceneRefs';
 // Ward light rig calm baselines (spec §6); the crash dims these ~12%, never dark.
 const HEMI_CALM = 0.9;
 const SUN_CALM = 1.8;
-const FOCUS_CALM = 0.15;
-const FOCUS_ALERT = 0.95;
+// Always-on judge-room pool (the "you are here" focal light), rising on alert.
+const FOCUS_CALM = 0.55;
+const FOCUS_ALERT = 1.1;
 
 const LED_BASE_INTENSITY = 3;
 

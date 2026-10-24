@@ -59,8 +59,8 @@ export const Scene = memo(function Scene({ getDevice, reducedMotion }: Props) {
     <>
       <Lighting hemiRef={refs.hemi} sunRef={refs.sun} />
 
-      {/* The ward, auto-framed to the panel from the iso orbit. */}
-      <Bounds fit clip observe margin={1.15} maxDuration={0.8}>
+      {/* The (now larger, two-row) ward, auto-framed to the panel. */}
+      <Bounds fit clip observe margin={1.2} maxDuration={0.8}>
         <Center disableY>
           <Ward layout={ROOM_LAYOUT} refs={refs} screenTex={screenTex} />
         </Center>
@@ -79,9 +79,10 @@ export const Scene = memo(function Scene({ getDevice, reducedMotion }: Props) {
         smooth
       />
 
-      {/* Dollhouse-isometric orbit: always looking DOWN into the roofless rooms,
-          gentle azimuth arc, clamped zoom. Idle auto-orbit lives in DeviceDriver
-          and pauses while the viewer drags (interacting ref). */}
+      {/* Dollhouse-isometric orbit: looking DOWN into the roofless rooms, but now
+          free to swing most of the way around the ward and from near-top-down to
+          a low angle (never under the floor). Smooth damping, clamped zoom, no
+          pan. Idle auto-orbit lives in DeviceDriver and pauses while dragging. */}
       <OrbitControls
         ref={refs.controls}
         makeDefault
@@ -89,13 +90,13 @@ export const Scene = memo(function Scene({ getDevice, reducedMotion }: Props) {
         dampingFactor={0.08}
         enablePan={false}
         enableZoom
-        minDistance={18}
-        maxDistance={30}
-        minPolarAngle={0.78}
-        maxPolarAngle={1.08}
-        minAzimuthAngle={0.42}
-        maxAzimuthAngle={1.02}
-        target={[-1.5, 0.6, -1]}
+        minDistance={16}
+        maxDistance={44}
+        minPolarAngle={Math.PI * 0.18}
+        maxPolarAngle={Math.PI * 0.46}
+        minAzimuthAngle={-Math.PI * 0.6}
+        maxAzimuthAngle={Math.PI * 0.6}
+        target={[-1.5, 0.5, -1]}
         onStart={() => {
           refs.interacting.current = true;
         }}

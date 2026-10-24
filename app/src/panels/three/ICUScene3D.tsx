@@ -36,9 +36,8 @@ interface Props {
   fallback?: ReactNode;
 }
 
-// The shared bordered surface so the 3D box matches the 2D monitor box exactly.
-const SURFACE_CLASS =
-  'min-h-56 flex-1 overflow-hidden rounded-lg border border-border';
+// Fill the whole card; the bright scene is the frame's content, not a boxed inset.
+const SURFACE_CLASS = 'h-full min-h-0 flex-1 overflow-hidden rounded-md';
 
 /** Track `prefers-reduced-motion`, updating live if the viewer toggles it. */
 function usePrefersReducedMotion(): boolean {
@@ -101,7 +100,7 @@ export default function ICUScene3D({ device, fallback = null }: Props) {
             stencil: false,
             powerPreference: 'high-performance',
           }}
-          camera={{ position: [14, 13, 16], fov: 32, near: 0.5, far: 120 }}
+          camera={{ position: [12, 17, 16], fov: 34, near: 0.5, far: 120 }}
           onCreated={({ gl }) => gl.setClearColor('#EEF3F8', 1)}
         >
           <FrameInvalidator device={device} />

@@ -33,8 +33,8 @@ export function App() {
       </header>
 
       <main className="grid min-h-0 flex-1 grid-cols-1 gap-3 p-3 lg:grid-cols-2">
-        {/* Left: the patient monitor, rendered from the same device row. Untouched. */}
-        <div className="min-h-0">
+        {/* Left: the ward, rendered from the same device row -> no desync. */}
+        <div className="card min-h-0 overflow-hidden">
           <SimPanel device={rt.device} />
         </div>
 

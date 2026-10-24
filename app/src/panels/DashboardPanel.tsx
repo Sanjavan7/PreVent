@@ -13,7 +13,7 @@
 // each stage's sponsor-critical artifact via renderExtras so the feed stays
 // generic.
 
-import { useMemo, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { motion, useReducedMotion } from 'motion/react';
 import type {
   AgentStatus,
@@ -31,6 +31,7 @@ import { ApprovalGate } from '../components/gate/ApprovalGate';
 import { CompactDiff } from '../components/primitives/CompactDiff';
 import { Disclosure } from '../components/primitives/Disclosure';
 import { TruthStrip } from '../components/truth/TruthStrip';
+import { requestMockApprove } from '../realtime/useRealtimeMock';
 import { SPRING } from '../lib/motion';
 
 interface Props {
@@ -280,6 +281,14 @@ export function DashboardPanel({
 }: Props) {
   const [approved, setApproved] = useState(false);
 
+  // Approving keeps the existing optimistic UI (local `approved` flips the gate
+  // to "Deploying…") AND advances the scripted mock demo director past its
+  // waiting_for_human hold. In live mode requestMockApprove is a no-op.
+  const handleApprove = useCallback(() => {
+    setApproved(true);
+    requestMockApprove();
+  }, []);
+
   // PURE selector, memoized in render (never in an effect).
   const entries = useMemo(() => deriveActivity(agents), [agents]);
 
@@ -309,9 +318,9 @@ export function DashboardPanel({
       patchAttempts,
       approved,
       meta: { deviceLabel: DEVICE_LABEL, fleetSize: FLEET_SIZE, live },
-      actions: { approve: () => setApproved(true) },
+      actions: { approve: handleApprove },
     }),
-    [device, agents, findings, eventLog, exploitRuns, patchAttempts, approved, live],
+    [device, agents, findings, eventLog, exploitRuns, patchAttempts, approved, live, handleApprove],
   );
 
   // Per-stage artifacts injected into the generic feed.
@@ -330,7 +339,7 @@ export function DashboardPanel({
             <ApprovalGate
               show={entry.status === 'needs-approval'}
               approved={approved}
-              onApprove={() => setApproved(true)}
+              onApprove={handleApprove}
             />
           </>
         );

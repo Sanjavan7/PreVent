@@ -1,17 +1,18 @@
-// The strolling crowd (spec §5). Primitive peg-people as exactly TWO
-// InstancedMesh -- bodies (capsules) + heads (spheres) -> 2 draw calls for the
-// whole ward. They walk a shared waypoint loop in THIS component's OWN useFrame
-// (separate from DeviceDriver by design, still frame-loop-only: no setState, no
-// per-frame React work). Matrices are written through one shared Object3D dummy.
+// The nurses (spec §5). A SMALL, structured life: just 2-3 nurses walking the
+// central corridor, occasionally dipping toward a room doorway and returning
+// (the waypoint loop in layout.ts weaves those dips in). NO crowd. Primitive
+// peg-people as exactly TWO InstancedMesh -- bodies (capsules) + heads (spheres)
+// -> 2 draw calls total. They walk a shared waypoint loop in THIS component's
+// OWN useFrame (separate from DeviceDriver by design, still frame-loop-only: no
+// setState, no per-frame React work). Matrices go through one shared dummy.
 //
-// The crowd is intentionally UNAFFECTED by the crash -- while the judge room
-// warms and pulses, everyone keeps strolling calmly. That contrast ("one patient
-// out of thousands, caught in time") is the narrative. Colours are calm scrubs
-// in the brand/neutral/mint families only -- never raw red or green.
+// The nurses are intentionally UNAFFECTED by the crash -- while the judge room
+// warms and pulses, they keep walking calmly. That contrast ("one patient out of
+// thousands, caught in time") is the narrative. Colours are calm scrubs in the
+// brand/neutral/mint families only -- never raw red or green.
 //
-// Count scales with the perf tier; capped on low-core machines so the ward is
-// never empty (the owner's vision is "people walking around"). Reduced motion
-// freezes everyone mid-stroll (static positions, no bob).
+// Count stays tiny across perf tiers (never a crowd); reduced motion freezes
+// everyone mid-stroll (static positions, no bob).
 
 import { memo, useLayoutEffect, useMemo, useRef } from 'react';
 import { useFrame } from '@react-three/fiber';
@@ -28,10 +29,11 @@ interface Props {
   tier: PerfTier;
 }
 
-const COUNT_BY_TIER: Record<PerfTier, number> = { HIGH: 10, MED: 6, LOW: 4 };
+// Tiny on every tier -- 2-3 nurses, never a crowd.
+const COUNT_BY_TIER: Record<PerfTier, number> = { HIGH: 3, MED: 3, LOW: 2 };
 
 // Calm scrub colours (brand / neutral-slate / soft-teal) -- no red/green.
-const SCRUBS = [0xbfe4ff, 0x9fb0c3, 0x7fc8bf, 0xc7d0d9, 0x0097fe];
+const SCRUBS = [0xbfe4ff, 0x7fc8bf, 0x9fb0c3, 0x0097fe, 0xc7d0d9];
 
 const BODY_Y = 0.43; // capsule centre so the feet sit near the floor
 const HEAD_Y = 0.98;
@@ -49,8 +51,9 @@ export const People = memo(function People({ layout, reducedMotion, tier }: Prop
   const cores =
     (typeof navigator !== 'undefined' && navigator.hardwareConcurrency) || 8;
   const base = COUNT_BY_TIER[tier];
-  // Keep a few walkers even on modest hardware (vision: a living ward).
-  const count = cores < 6 ? Math.min(base, 4) : base;
+  // Keep at least a couple of nurses even on modest hardware (a living ward),
+  // but never a crowd.
+  const count = cores < 6 ? Math.min(base, 2) : base;
 
   const bodies = useRef<InstancedMesh>(null);
   const heads = useRef<InstancedMesh>(null);

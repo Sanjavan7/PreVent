@@ -36,6 +36,10 @@ export interface RealtimeState {
   /** Mock-only: flip the device between healthy and exploited fixtures. */
   mockExploited: boolean;
   setMockExploited: (exploited: boolean) => void;
+  /** Human approval of the Factory patch gate. In mock mode this advances the
+   *  scripted demo director past the waiting_for_human hold; a no-op in live
+   *  mode (the real backend drives approval). */
+  approve: () => void;
 }
 
 const BACKEND = import.meta.env.VITE_REALTIME_BACKEND ?? 'mock';

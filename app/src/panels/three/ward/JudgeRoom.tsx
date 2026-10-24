@@ -109,19 +109,48 @@ export const JudgeRoom = memo(function JudgeRoom({
           />
         </mesh>
 
-        {/* Soft warm focus spotlight angled down into the room (ramps on alert). */}
-        <primitive object={spotTarget} position={[BED[0], 0.5, BED[2]]} />
+        {/* Soft warm focus spotlight angled straight DOWN into the room -- always
+            pooling light so this reads as the "you are here" room at a glance,
+            then ramps brighter on alert (DeviceDriver drives .intensity). */}
+        <primitive object={spotTarget} position={[BED[0], 0.4, BED[2]]} />
         <spotLight
           ref={refs.focusLight}
-          position={[BED[0] + 0.4, 3.4, BED[2] + 0.6]}
+          position={[BED[0], 4.2, BED[2] + 0.2]}
           target={spotTarget}
-          angle={0.7}
-          penumbra={0.9}
-          intensity={0.15}
-          distance={10}
+          angle={0.62}
+          penumbra={0.85}
+          intensity={0.55}
+          distance={12}
           decay={2}
           color={hex(C.sun)}
         />
+
+        {/* Visible soft beam cone from overhead down into the room (static set-
+            dressing; translucent so it reads as a shaft of light, not a solid). */}
+        <mesh position={[BED[0], 2.0, BED[2] + 0.1]}>
+          <cylinderGeometry args={[0.18, 1.55, 3.9, 32, 1, true]} />
+          <meshBasicMaterial
+            color={hex(C.sun)}
+            transparent
+            opacity={0.07}
+            depthWrite={false}
+            toneMapped={false}
+            side={2}
+          />
+        </mesh>
+
+        {/* Floor "you are here" marker: a soft brand light-pool disc filling the
+            room floor under the spotlight -- the obvious focal locator. */}
+        <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.1, 0]}>
+          <circleGeometry args={[1.7, 48]} />
+          <meshBasicMaterial
+            color={hex(C.brandTint)}
+            transparent
+            opacity={0.3}
+            depthWrite={false}
+            toneMapped={false}
+          />
+        </mesh>
 
         {/* Bed + resting judge patient. */}
         <group position={BED}>
