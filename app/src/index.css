@@ -48,3 +48,27 @@ body {
 .pulse {
   animation: prevent-pulse 1.1s var(--ease-prevent) infinite;
 }
+
+/* react-diff-view ships a light theme; recolor via its own CSS variables so
+   the diff reads cleanly on our dark panel. Scoped to `.diff` so it wins
+   specificity against the library's own :root defaults (which import later). */
+.diff {
+  --diff-background-color: transparent;
+  --diff-text-color: #e6edf3;
+  --diff-font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo,
+    monospace;
+  --diff-gutter-insert-background-color: rgba(34, 197, 94, 0.18);
+  --diff-gutter-insert-text-color: #86efac;
+  --diff-gutter-delete-background-color: rgba(239, 68, 68, 0.18);
+  --diff-gutter-delete-text-color: #fca5a5;
+  --diff-code-insert-background-color: rgba(34, 197, 94, 0.1);
+  --diff-code-insert-text-color: #86efac;
+  --diff-code-delete-background-color: rgba(239, 68, 68, 0.1);
+  --diff-code-delete-text-color: #fca5a5;
+  --diff-code-insert-edit-background-color: rgba(34, 197, 94, 0.3);
+  --diff-code-delete-edit-background-color: rgba(239, 68, 68, 0.3);
+  font-size: 12px;
+}
+.diff-decoration-content {
+  color: var(--color-muted);
+}
