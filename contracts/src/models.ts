@@ -10,10 +10,14 @@ export const CLAUDE_MODELS = {
 export const ANTHROPIC_VERSION = '2026-10-21';
 export const CLAUDE_AGENT_SDK = '@anthropic-ai/claude-agent-sdk@0.3.310';
 
-// Bitdeer (OpenAI-compatible). Model id verified 2026-10-24 (DeepSeek-V4-Pro does NOT exist).
+// Bitdeer (OpenAI-compatible: POST /v1/chat/completions, Authorization: Bearer).
+// Model id from the Bitdeer model page carries a date suffix (`-1017`); the
+// suffix-less id is kept as a fallback. Auth error observed live is HTTP 402
+// `insufficient_balance` (the account needs credits), not the 403 in old docs.
 export const BITDEER = {
   baseUrl: 'https://api-inference.bitdeer.ai/v1',
-  model: 'deepseek-ai/DeepSeek-V4.1-Flash',
+  model: 'deepseek-ai/DeepSeek-V4.1-Flash-1017',
+  modelFallback: 'deepseek-ai/DeepSeek-V4.1-Flash',
   altModel: 'zai-org/GLM-5.3',
 } as const;
 
