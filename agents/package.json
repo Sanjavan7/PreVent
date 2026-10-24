@@ -5,8 +5,11 @@
   "type": "module",
   "main": "src/orchestrator.ts",
   "scripts": {
+    "//express": "Express loop: bash -> PREVENT_EXPRESS=1 pnpm dev ; pwsh -> $env:PREVENT_EXPRESS=1; pnpm dev",
     "typecheck": "tsc --noEmit",
-    "dev": "tsx src/orchestrator.ts"
+    "dev": "tsx src/orchestrator.ts",
+    "bench": "tsx src/bench.ts",
+    "record:droid": "tsx src/factory/record.ts"
   },
   "dependencies": {
     "@prevent/contracts": "workspace:*",
