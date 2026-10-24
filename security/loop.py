@@ -268,16 +268,32 @@ def run_loop(
         )
         after = fetch_device_status_row(base_url=svc.base_url)
         sink.update_device_status(after, "after exploit")
-        lying = after["reportedHr"] != after["trueHr"] or after["reportedSpo2"] != after["trueSpo2"]
-        fan_stopped = before["fanOn"] and not after["fanOn"]
-        impact = (
-            f"fan {'STOPPED' if fan_stopped else 'unchanged'}; "
-            f"true vitals {after['trueHr']}/{after['trueSpo2']} but device reports "
-            f"{after['reportedHr']}/{after['reportedSpo2']} and alarm is "
-            f"{'OFF (silent)' if not after['alarmActive'] else 'ON'} — "
-            f"{'the device is LYING' if lying or not after['alarmActive'] else 'honest'}."
+        lying = (
+            after["reportedHr"] != after["trueHr"]
+            or after["reportedSpo2"] != after["trueSpo2"]
+            or (not after["fanOn"] and not after["alarmActive"])
         )
-        exploit_worked = result["statusCode"] == 200 and after["compromised"]
+        fan_stopped = before["fanOn"] and not after["fanOn"]
+        action = payload["command"]["action"]
+        if fan_stopped:
+            impact = (
+                f"fan STOPPED; true vitals {after['trueHr']}/{after['trueSpo2']} but device reports "
+                f"{after['reportedHr']}/{after['reportedSpo2']} and alarm is "
+                f"{'OFF (silent)' if not after['alarmActive'] else 'ON'} — the device is LYING."
+            )
+        elif action == "set_rate":
+            impact = (
+                f"unauthenticated set_rate accepted (rate={payload['command'].get('rate')}); "
+                "no auth required — attacker drives the device (CWE-306 over-pressure)."
+            )
+        else:
+            impact = (
+                f"unauthenticated {action} accepted; reported {after['reportedHr']}/{after['reportedSpo2']} "
+                f"vs true {after['trueHr']}/{after['trueSpo2']}" + (" — LYING." if lying else ".")
+            )
+        # The CWE-306 compromise, invariant across payloads: an unauthenticated
+        # state-changing command was ACCEPTED when it should have required auth.
+        exploit_worked = result["statusCode"] == 200
         sink.record_exploit_run(
             {
                 "findingId": chosen.get("id", 0),

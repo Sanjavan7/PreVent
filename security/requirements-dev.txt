@@ -1,0 +1,5 @@
+# Dev/test deps for the PreVent security package (Dev 2). Install into the same
+# Python 3.11-3.13 venv as requirements.txt:
+#   python -m pip install -r security/requirements.txt -r security/requirements-dev.txt
+# semgrep + bandit are separate standalone tool installs (see requirements.txt).
+pytest>=8,<9
