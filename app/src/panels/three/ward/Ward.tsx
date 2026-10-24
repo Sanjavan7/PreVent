@@ -23,9 +23,11 @@ interface Props {
   refs: SceneRefs;
   /** Live Pixi waveform for the judge-room monitor (null before ready). */
   screenTex: CanvasTexture | null;
+  /** Forwarded to generic rooms so their ambient patient breath holds under RM. */
+  reducedMotion: boolean;
 }
 
-export const Ward = memo(function Ward({ layout, refs, screenTex }: Props) {
+export const Ward = memo(function Ward({ layout, refs, screenTex, reducedMotion }: Props) {
   const { floor } = layout;
   return (
     <group>
@@ -47,7 +49,7 @@ export const Ward = memo(function Ward({ layout, refs, screenTex }: Props) {
             refs={refs}
           />
         ) : (
-          <Room key={room.id} center={room.center} rotY={room.rotY} />
+          <Room key={room.id} center={room.center} rotY={room.rotY} reducedMotion={reducedMotion} />
         ),
       )}
 

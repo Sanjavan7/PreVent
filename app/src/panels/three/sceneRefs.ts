@@ -71,6 +71,9 @@ export interface SceneRefs {
   codeHud: RefObject<HTMLDivElement | null>;
   /** Judge-room label chip; warms blue -> coral on admitted alarm. */
   pinEl: RefObject<HTMLDivElement | null>;
+  /** Big floating judge-room STATUS chip ("STABLE" green / "NO AIR" red); its
+   *  text + colour are driven imperatively by DeviceDriver on a device flip. */
+  statusEl: RefObject<HTMLDivElement | null>;
   /** Crowd bodies InstancedMesh (ambient; driven in People.tsx, not here). */
   people: RefObject<InstancedMesh | null>;
   /** OrbitControls handle for the idle auto-orbit. */
@@ -97,6 +100,7 @@ export function useSceneRefs(): SceneRefs {
     chroma: useRef<ChromaticAberrationEffect | null>(null),
     codeHud: useRef<HTMLDivElement | null>(null),
     pinEl: useRef<HTMLDivElement | null>(null),
+    statusEl: useRef<HTMLDivElement | null>(null),
     people: useRef<InstancedMesh | null>(null),
     controls: useRef<OrbitControlsHandle | null>(null),
     interacting: useRef<boolean>(false),

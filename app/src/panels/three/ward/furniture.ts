@@ -12,8 +12,9 @@
 // Authored as .ts (not .tsx) via React.createElement so the file stays a plain
 // builder module; JSX rooms compose these.
 
-import { createElement as h, memo } from 'react';
+import { createElement as h, memo, useRef } from 'react';
 import type { ReactNode, RefObject } from 'react';
+import { useFrame } from '@react-three/fiber';
 import type { CanvasTexture, Group, Mesh, MeshStandardMaterial } from 'three';
 import { hex, C } from '../palette';
 
@@ -142,20 +143,52 @@ export const Bed = memo(function Bed({ position = [0, 0, 0], rotation }: Placed)
 });
 
 // --- RestingPatient: a calm low-poly figure under a sheet, resting on a bed ----
-// Matches the judge patient's silhouette (head toward -Z) but is pure static
-// set-dressing -- no breathing ref -- so every generic room gets "one patient
-// per room." Place it at the room's bed anchor; the Bed already owns the pillow.
+// Matches the judge patient's silhouette (head toward -Z). Its torso breathes
+// gently and ALWAYS (ambient life -- these are not the device, they just read as
+// living people); the motion is deliberately subtler than the judge patient's.
+// Each instance seeds a random phase so the ward's patients breathe out of sync,
+// and under reduced motion the torso holds a static mid-inhale pose. The torso
+// group scales/lifts about its y = 0.6 origin (head + blanket stay still), and
+// the breath runs in its OWN lightweight useFrame subscriber (like the crowd),
+// never setState -- so the room stays React.memo and never reconciles on a tick.
+const AMB_BASE_Y = 0.6;
+const AMB_RISE = 0.02; // ~2 cm lift -- subtle ambient life
+const AMB_SCALE = 0.1; // up to 10% torso swell
+const AMB_W = (Math.PI * 2) / 4.5; // ~13 breaths/min, calmer than the judge's
+
 export const RestingPatient = memo(function RestingPatient({
   position = [0, 0, 0],
   rotation,
-}: Placed) {
+  reducedMotion = false,
+}: Placed & { reducedMotion?: boolean }) {
+  const torso = useRef<Group>(null);
+  // Per-instance phase offset so the ward's patients breathe out of lockstep.
+  const phase = useRef(Math.random() * Math.PI * 2);
+  useFrame((state) => {
+    const g = torso.current;
+    if (!g) return;
+    if (reducedMotion) {
+      // Hold a gentle static mid-inhale pose (alive, but not moving).
+      g.scale.y = 1 + AMB_SCALE * 0.5;
+      g.position.y = AMB_BASE_Y + AMB_RISE * 0.5;
+      return;
+    }
+    const stroke = 0.5 + 0.5 * Math.sin(state.clock.elapsedTime * AMB_W + phase.current);
+    g.scale.y = 1 + stroke * AMB_SCALE;
+    g.position.y = AMB_BASE_Y + stroke * AMB_RISE;
+  });
   return h('group', { position, rotation }, [
-    // Torso mound under the sheet (bright linen).
+    // Breathing torso mound under the sheet (bright linen). Wrapped in a group so
+    // the breath scales/lifts about the y = 0.6 origin without moving head/blanket.
     h(
-      'mesh',
-      { key: 'torso', position: [0, 0.6, 0.0], castShadow: true },
-      h('boxGeometry', { args: [0.46, 0.16, 0.95] }),
-      matte(C.linen, 0.95),
+      'group',
+      { key: 'torso', ref: torso, position: [0, AMB_BASE_Y, 0.0] },
+      h(
+        'mesh',
+        { castShadow: true },
+        h('boxGeometry', { args: [0.46, 0.16, 0.95] }),
+        matte(C.linen, 0.95),
+      ),
     ),
     // Blanket over the lower body.
     h(

@@ -356,7 +356,7 @@ export function DashboardPanel({
     <PipelineProvider value={value}>
       <section
         aria-label="Security pipeline dashboard"
-        className="mx-auto flex h-full min-h-0 w-full max-w-[640px] flex-col"
+        className="flex h-full min-h-0 w-full flex-col"
       >
         <HeaderStrip compromised={device.compromised} patched={patched} done={done} live={live} />
 

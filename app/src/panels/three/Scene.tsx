@@ -62,7 +62,9 @@ export const Scene = memo(function Scene({ getDevice, reducedMotion }: Props) {
   // WardInteractions layer -- the memoized <Ward> subtree bails out (its props
   // never depend on hover/selection). The smooth camera glide to the selected
   // room runs in CameraRig's useFrame; this state just names the target.
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  // Default selection = the judge room (202), so the "You are here" arrow +
+  // label and the focused framing land on load over the judge's bed.
+  const [selectedId, setSelectedId] = useState<string | null>('R2');
   const [hoveredId, setHoveredId] = useState<string | null>(null);
 
   return (
@@ -72,7 +74,7 @@ export const Scene = memo(function Scene({ getDevice, reducedMotion }: Props) {
       {/* The (now larger, two-row) ward, auto-framed to the panel. */}
       <Bounds fit clip observe margin={1.2} maxDuration={0.8}>
         <Center disableY>
-          <Ward layout={ROOM_LAYOUT} refs={refs} screenTex={screenTex} />
+          <Ward layout={ROOM_LAYOUT} refs={refs} screenTex={screenTex} reducedMotion={reducedMotion} />
           {/* Click-to-focus hit areas, highlights + labels. Same local space as
               Ward so it rides the Center/Bounds transform and stays aligned. */}
           <WardInteractions
@@ -80,6 +82,7 @@ export const Scene = memo(function Scene({ getDevice, reducedMotion }: Props) {
             hoveredId={hoveredId}
             onHover={setHoveredId}
             onSelect={setSelectedId}
+            reducedMotion={reducedMotion}
           />
         </Center>
       </Bounds>

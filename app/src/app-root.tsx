@@ -1,13 +1,13 @@
-import { StrictMode } from 'react';
-import { createRoot } from 'react-dom/client';
+// Shared provider shell for both standalone pages (Command Center + Patient
+// Ward). Extracted verbatim from the old single-page main.tsx so each entry
+// wraps its page in exactly the same house motion defaults, the convex
+// fail-loud guard, and (only in live mode) the SpacetimeDB connection — one
+// subscription source, two pages, no desync.
+
+import type { ReactNode } from 'react';
 import { MotionConfig } from 'motion/react';
 import { SpacetimeDBProvider } from 'spacetimedb/react';
 import { createSpacetimeBuilder } from '@prevent/realtime/spacetime';
-import './index.css';
-import { App } from './App';
-
-const el = document.getElementById('root');
-if (!el) throw new Error('#root not found');
 
 // Build-time envs. The branch is constant across renders -> safe for hook rules
 // in useRealtime.ts. Flipping backend is a one-line .env change + reload.
@@ -26,16 +26,19 @@ if (BACKEND !== 'mock' && BACKEND !== 'spacetimedb') {
   );
 }
 
-// One app element -> wrapped once in the house motion defaults. `reducedMotion:
-// "user"` disables transform/layout animation (keeps opacity/color) when the OS
-// "Reduce Motion" setting is on; the spring is the un-overridden default.
-const app = (
-  <MotionConfig reducedMotion="user" transition={{ type: 'spring', stiffness: 260, damping: 28 }}>
-    <App />
-  </MotionConfig>
-);
+// `reducedMotion: "user"` disables transform/layout animation (keeps
+// opacity/color) when the OS "Reduce Motion" setting is on; the spring is the
+// un-overridden house default inherited by every page.
+export function AppRoot({ children }: { children: ReactNode }) {
+  const app = (
+    <MotionConfig
+      reducedMotion="user"
+      transition={{ type: 'spring', stiffness: 260, damping: 28 }}
+    >
+      {children}
+    </MotionConfig>
+  );
 
-function Root() {
   if (BACKEND === 'spacetimedb') {
     // DO NOT call .build() -- the provider owns the connection lifecycle.
     const builder = createSpacetimeBuilder({
@@ -50,9 +53,3 @@ function Root() {
   }
   return app;
 }
-
-createRoot(el).render(
-  <StrictMode>
-    <Root />
-  </StrictMode>,
-);
