@@ -121,136 +121,146 @@ section { position: relative; min-height: 100vh; padding: 130px 32px 100px; }
 .r.d4 { transition-delay: 360ms; }
 .r.d5 { transition-delay: 500ms; }
 
-/* ---------- HERO · real newspaper clipping on a dark desk ---------- */
+/* ============================================================
+   HERO · the papers slam onto the desk
+   Six real newspaper clippings fly in from off-screen one after
+   another ("boom boom boom"), landing scattered. No text. The
+   evidence IS the story.
+   ============================================================ */
 #hero {
   min-height: 100vh;
-  padding: 120px 40px 120px;
-  display: grid; grid-template-rows: 1fr auto;
-  align-items: center; justify-items: center;
+  padding: 0;
+  display: grid; place-items: center;
   background:
-    radial-gradient(1200px 700px at 50% 30%, rgba(255,255,255,0.03), transparent 65%),
-    radial-gradient(1800px 1200px at 50% 110%, rgba(255,45,74,0.05), transparent 65%),
-    linear-gradient(180deg, #0A0A0C 0%, #050506 100%);
+    radial-gradient(900px 600px at 50% 42%, rgba(255,255,255,0.05), transparent 60%),
+    radial-gradient(1800px 1400px at 50% 120%, rgba(255,45,74,0.07), transparent 55%),
+    linear-gradient(180deg, #0A0A0C 0%, #050506 65%, #020203 100%);
   position: relative; overflow: hidden;
 }
 
-/* Three-column layout: punchline left · the clipping · caption right */
-#hero .exhibit {
+/* "Wood desk" micro-texture under everything */
+#hero::before {
+  content: ""; position: absolute; inset: 0; pointer-events: none;
+  opacity: .22; mix-blend-mode: overlay;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='400' height='400'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.75' numOctaves='2' seed='3'/><feColorMatrix values='0 0 0 0 0.5  0 0 0 0 0.45  0 0 0 0 0.4  0 0 0 0.3 0'/></filter><rect width='100%25' height='100%25' filter='url(%23n)'/></svg>");
+}
+
+/* Scene — holds the 6 papers; they position relative to its center. */
+.paper-stack {
   position: relative; z-index: 2;
-  width: 100%; max-width: 1360px;
-  display: grid; grid-template-columns: 1fr auto 1fr;
-  gap: 48px; align-items: center;
+  width: min(1200px, 94vw);
+  height: 700px;
+  perspective: 2200px;
 }
 
-/* Left side — our framing */
-#hero .frame-left { padding-right: 16px; }
-#hero .frame-left .kicker {
-  font-family: var(--f-mono); font-size: 11px; letter-spacing: .3em;
-  text-transform: uppercase; color: var(--red);
-  display: inline-flex; align-items: center; gap: 10px; margin-bottom: 24px;
-}
-#hero .frame-left .kicker::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--red); box-shadow: 0 0 10px var(--red); animation: beat 1.8s var(--ease) infinite; }
-#hero .frame-left h1 {
-  font-family: var(--f-sans); font-weight: 500;
-  font-size: clamp(28px, 3.4vw, 50px); line-height: 1.02; letter-spacing: -0.025em;
-  margin: 0; color: var(--ink);
-}
-#hero .frame-left h1 em { font-style: italic; color: var(--red); font-weight: 400; }
-#hero .frame-left .sub {
-  margin-top: 24px; max-width: 420px;
-  color: var(--ink-2); font-size: 15px; line-height: 1.55;
-}
-#hero .frame-left .sub b { color: var(--ink); font-weight: 500; }
-
-/* The clipping — real newspaper screenshot, tilted on the desk */
-#hero .clipping {
-  position: relative;
-  width: min(500px, 44vw);
+.pp {
+  position: absolute; left: 50%; top: 50%;
+  width: 380px; height: auto;
+  margin: -250px 0 0 -190px;        /* center the paper on the scene origin */
+  display: block;
   background: #000;
   border-radius: 2px;
-  overflow: hidden;
-  transform: perspective(2400px) rotateX(2deg) rotateZ(-0.9deg);
-  transform-origin: 50% 50%;
+  opacity: 0;
+  cursor: pointer;
+  will-change: transform, opacity, filter;
+  animation: slam 720ms cubic-bezier(.22, 1.42, .36, 1) var(--d, 0ms) forwards;
+  /* Strong "landed on desk" shadow stack */
   box-shadow:
-    0 2px 0 rgba(255,255,255,0.04) inset,
-    0 20px 50px -14px rgba(0,0,0,0.6),
-    0 60px 120px -40px rgba(0,0,0,0.8),
-    0 100px 180px -60px rgba(0,0,0,0.6);
+    0 1px 0 rgba(255,255,255,0.04) inset,
+    0 4px 10px -2px rgba(0,0,0,0.4),
+    0 22px 50px -14px rgba(0,0,0,0.65),
+    0 60px 120px -40px rgba(0,0,0,0.75);
+  /* Subtle hover: pop forward */
+  transition: filter 300ms var(--ease);
 }
-#hero .clipping img { display: block; width: 100%; height: auto; }
-/* Subtle paper grain over the screenshot — makes it feel printed, not screenshotted */
-#hero .clipping::before {
-  content: ""; position: absolute; inset: 0; pointer-events: none;
-  opacity: .35; mix-blend-mode: multiply;
-  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='300' height='300'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' seed='11'/><feColorMatrix values='0 0 0 0 0.06  0 0 0 0 0.05  0 0 0 0 0.04  0 0 0 0.14 0'/></filter><rect width='100%25' height='100%25' filter='url(%23n)'/></svg>");
-}
-/* A soft spotlight / vignette on the clipping */
-#hero .clipping::after {
-  content: ""; position: absolute; inset: 0; pointer-events: none;
-  background: radial-gradient(120% 100% at 50% -10%, rgba(255,255,255,0.08), transparent 55%),
-              radial-gradient(120% 100% at 50% 110%, rgba(0,0,0,0.35), transparent 55%);
-  mix-blend-mode: overlay;
+.pp:hover { filter: brightness(1.08); z-index: 100 !important; }
+
+/* The slam keyframe reads --from and --to for each paper. */
+@keyframes slam {
+  from { opacity: 0;   transform: var(--from); }
+  to   { opacity: 1;   transform: var(--to); }
 }
 
-/* Right side — attribution block styled like a museum/evidence tag */
-#hero .evidence-tag { padding-left: 16px; }
-#hero .evidence-tag .tag-label {
-  font-family: var(--f-mono); font-size: 10.5px; letter-spacing: .3em;
-  text-transform: uppercase; color: var(--ink-dim); margin-bottom: 14px;
+/* Each paper's trajectory + resting spot. Order of z-index = order of landing. */
+.pp1 {   /* MIT Technology Review — bottom of the pile, upper-left */
+  --d: 120ms;  z-index: 1;
+  --from: translate(-900px, -520px) rotate(-34deg) scale(.5);
+  --to:   translate(-310px, -140px) rotate(-11deg) scale(.78);
 }
-#hero .evidence-tag .pub {
-  font-family: var(--f-serif); font-weight: 900; font-style: normal;
-  font-size: 32px; line-height: 1; color: var(--ink); margin-bottom: 4px;
-  font-variation-settings: "opsz" 48;
+.pp2 {   /* PBS Ascension — upper-right */
+  --d: 300ms;  z-index: 2;
+  --from: translate(900px, -520px) rotate(28deg) scale(.5);
+  --to:   translate(310px, -150px) rotate(9deg) scale(.80);
 }
-#hero .evidence-tag dl {
-  display: grid; grid-template-columns: 90px 1fr; row-gap: 10px; column-gap: 14px;
-  margin: 24px 0 0; font-family: var(--f-mono); font-size: 11.5px; letter-spacing: .14em;
+.pp3 {   /* HFMA Prospect — lower-left */
+  --d: 500ms;  z-index: 3;
+  --from: translate(-900px, 520px) rotate(-22deg) scale(.5);
+  --to:   translate(-350px, 120px) rotate(-14deg) scale(.82);
+}
+.pp4 {   /* BI Medtronic — lower-right */
+  --d: 700ms;  z-index: 4;
+  --from: translate(900px, 520px) rotate(30deg) scale(.5);
+  --to:   translate(340px, 100px) rotate(12deg) scale(.80);
+}
+.pp5 {   /* NY AG Change Healthcare — center-left, bigger */
+  --d: 920ms;  z-index: 5;
+  --from: translate(-80px, -600px) rotate(14deg) scale(.5);
+  --to:   translate(-130px, -40px) rotate(-4deg) scale(.90);
+}
+.pp6 {   /* WIRED Düsseldorf — climax, largest, on top */
+  --d: 1180ms; z-index: 6;
+  --from: translate(140px, -620px) rotate(-10deg) scale(.5);
+  --to:   translate(110px, 40px) rotate(3deg) scale(1.00);
+}
+
+/* After all papers land, a tiny museum caption fades in bottom-center */
+#hero .caption {
+  position: absolute; left: 50%; bottom: 54px; transform: translateX(-50%);
+  z-index: 3; text-align: center;
+  font-family: var(--f-mono); font-size: 11px; letter-spacing: .28em;
   text-transform: uppercase; color: var(--ink-dim);
+  opacity: 0; animation: fadein 900ms var(--ease) 2000ms forwards;
+  display: flex; align-items: center; gap: 16px; white-space: nowrap;
 }
-#hero .evidence-tag dt { color: var(--ink-faint); }
-#hero .evidence-tag dd { margin: 0; color: var(--ink-2); }
-#hero .evidence-tag dd b { color: var(--ink); font-weight: 500; }
-#hero .evidence-tag .quote {
-  margin-top: 28px; padding-top: 20px; border-top: 1px solid var(--rule);
-  font-family: var(--f-serif); font-style: italic; font-weight: 400;
-  font-size: 20px; line-height: 1.4; color: var(--ink-2); max-width: 380px;
-}
-#hero .evidence-tag .quote em { color: var(--red); font-style: italic; }
+#hero .caption b { color: var(--ink); font-weight: 400; }
+#hero .caption .dot { width: 5px; height: 5px; border-radius: 50%; background: var(--red); box-shadow: 0 0 8px var(--red); }
+@keyframes fadein { to { opacity: 1; } }
 
-/* ECG waveform — a faint pulse under the clipping */
+/* ECG at bottom — tiny whisper now, barely visible */
 .ecg-hero {
-  position: absolute; left: 0; right: 0; bottom: 50px; z-index: 1; pointer-events: none;
+  position: absolute; left: 0; right: 0; bottom: 18px; z-index: 1; pointer-events: none;
   mask-image: linear-gradient(90deg, transparent 0%, #000 15%, #000 85%, transparent 100%);
-  opacity: .38;
+  opacity: .22;
 }
-.ecg-hero svg { width: 100%; height: 90px; display: block; }
+.ecg-hero svg { width: 100%; height: 36px; display: block; }
 .ecg-hero .trace {
-  fill: none; stroke: var(--red); stroke-width: 1.2;
-  filter: drop-shadow(0 0 6px rgba(255,45,74,.6));
+  fill: none; stroke: var(--red); stroke-width: 1.1;
+  filter: drop-shadow(0 0 4px rgba(255,45,74,.55));
   stroke-dasharray: 4000; stroke-dashoffset: 4000;
-  animation: ecgDraw 3.6s var(--ease) 600ms forwards;
+  animation: ecgDraw 3.4s var(--ease) 2400ms forwards;
 }
 @keyframes ecgDraw { to { stroke-dashoffset: 0; } }
 
-/* Scroll / arrow cue */
+/* Arrow-key cue — bottom right */
 .scroll-cue {
-  position: absolute; left: 50%; bottom: 22px; transform: translateX(-50%);
+  position: absolute; right: 32px; bottom: 22px; z-index: 3;
   font-family: var(--f-mono); font-size: 10.5px; letter-spacing: .3em;
   text-transform: uppercase; color: var(--ink-dim);
-  display: flex; align-items: center; gap: 14px; z-index: 3;
+  display: flex; align-items: center; gap: 12px;
+  opacity: 0; animation: fadein 900ms var(--ease) 2200ms forwards;
 }
 .scroll-cue .key {
   border: 1px solid var(--rule-strong); border-radius: 3px;
   padding: 2px 7px; color: var(--ink-2); letter-spacing: 0;
 }
 
-/* Responsive: on narrow screens, stack the three columns */
+/* Responsive — shrink the stage on smaller viewports so papers don't clip */
 @media (max-width: 1180px) {
-  #hero .exhibit { grid-template-columns: 1fr; gap: 36px; max-width: 560px; }
-  #hero .frame-left, #hero .evidence-tag { padding: 0; text-align: center; }
-  #hero .evidence-tag dl { justify-content: center; max-width: 420px; margin-left: auto; margin-right: auto; }
-  #hero .evidence-tag .quote { margin-left: auto; margin-right: auto; }
+  .paper-stack { height: 560px; transform: scale(0.78); transform-origin: center; }
+}
+@media (max-width: 760px) {
+  .paper-stack { transform: scale(0.55); height: 500px; }
+  #hero .caption { font-size: 10px; letter-spacing: .22em; padding: 0 20px; white-space: normal; text-align: center; }
 }
 
 /* ---------- THE LIE (section #lie) ---------- */
@@ -605,41 +615,19 @@ section { position: relative; min-height: 100vh; padding: 130px 32px 100px; }
     </svg>
   </div>
 
-  <div class="exhibit">
-    <!-- Left: our framing -->
-    <div class="frame-left r in">
-      <div class="kicker">Exhibit A · the attack class is real</div>
-      <h1>
-        It has happened.<br>
-        We built the tool<br>
-        that would have <em>caught it</em>.
-      </h1>
-      <p class="sub">
-        <b>PreVent</b> is a pipeline of AI agents that finds the vulnerability, proves it with a working exploit, writes the fix, and brings the device back online — every step visible, every change signed off by a human.
-      </p>
-    </div>
-
-    <!-- Center: the real newspaper clipping -->
-    <figure class="clipping r in d1">
-      <img src="assets/paper-wired-patient-dies.png" alt="WIRED headline: A Patient Dies After a Ransomware Attack Hits a Hospital — Sep 19 2020, article by Dan Goodin, Ars Technica, photograph of UKD Universitätsklinikum Düsseldorf by Lukas Schulze/Getty Images">
-    </figure>
-
-    <!-- Right: evidence tag -->
-    <aside class="evidence-tag r in d2">
-      <div class="tag-label">— Evidence —</div>
-      <div class="pub">WIRED</div>
-      <dl>
-        <dt>Reported</dt><dd>Sep&nbsp;19,&nbsp;<b>2020</b></dd>
-        <dt>Author</dt>  <dd>Dan&nbsp;Goodin · Ars&nbsp;Technica</dd>
-        <dt>Photo</dt>   <dd>Lukas&nbsp;Schulze / Getty&nbsp;Images</dd>
-        <dt>Target</dt>  <dd>Universitätsklinikum Düsseldorf</dd>
-        <dt>Vector</dt>  <dd>ransomware · VPN&nbsp;vuln (known)</dd>
-      </dl>
-      <p class="quote">
-        A patient died while a <em>known vulnerability</em> went unpatched. Our pitch isn't a hypothetical — it's a tool for the next one.
-      </p>
-    </aside>
+  <div class="paper-stack" aria-label="A pile of real news clippings about hospital and medical-device cyberattacks">
+    <img class="pp pp1" src="assets/paper-mit-tr-patient-died.png" alt="MIT Technology Review — A patient has died after ransomware hackers hit a German hospital, Sep 2020">
+    <img class="pp pp2" src="assets/paper-pbs-ascension.png" alt="PBS Wisconsin — Cyberattack forces Ascension health system to divert ambulances and take records offline, May 2024">
+    <img class="pp pp3" src="assets/paper-hfma-prospect.png" alt="HFMA — Cyberattack leaves hospitals scrambling in several states (Prospect Medical), Aug 2023">
+    <img class="pp pp4" src="assets/paper-bi-medtronic-pumps.png" alt="Business Insurance — FDA warns of cybersecurity risk to certain Medtronic insulin pumps, 2019">
+    <img class="pp pp5" src="assets/paper-ny-ag-change-healthcare.png" alt="NY Attorney General James urges UnitedHealth Group to help patients and providers harmed by cyberattack, 2024">
+    <img class="pp pp6" src="assets/paper-wired-patient-dies.png" alt="WIRED — A Patient Dies After a Ransomware Attack Hits a Hospital, Sep 2020">
   </div>
+
+  <p class="caption">
+    <span class="dot"></span>
+    <span>6 incidents · 2019 → <b>2024</b> · every one carried a <b>known vulnerability</b> at the time of the attack</span>
+  </p>
 
   <div class="scroll-cue"><span class="key">←</span><span class="key">→</span><span>navigate</span></div>
 </section>
