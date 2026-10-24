@@ -306,11 +306,20 @@ what's *simulated* (the patient, any fleet-scale visualization).
 - GENERATE/DELIVER payloads are keyed by IR code in `generate/exploit.py`
   (`PAYLOADS`); `deliver.on_ir_event(code)` is the entry point for the judge's
   remote press.
+- `security/stage_api.py` is the **subprocess bridge**: `python -m
+  security.stage_api <ground|scan|generate|deliver|verify|restore>` reuses the
+  stage functions and emits one JSON object (`{stage, ok, data, events}`) whose
+  `data` is a superset of the matching orchestrator stub shape, so Dev 1 can
+  shell out to a stage and parse stdout instead of reimplementing it in TS.
 
 **For Dev 3 (realtime):** the service writes the exact contract `DeviceStatus`
 shape (camelCase, `id:1`, `fanOn/trueHr/trueSpo2/reportedHr/reportedSpo2/
 alarmActive/compromised/lastCommand/updatedAt`). `updateDeviceStatus` should take
 that row as-is; the serial bridge / sim read the same row.
+- `security/emulate_stream.py` is the **row→serial bridge**: a Python port of
+  `contracts/src/serial.ts` that turns the shared `device_status` row (from the
+  row file or `GET /device/_truth`) into `STATE,…` frames on stdout, so the loop
+  can drive the emulator with no board and no realtime backend.
 
 ---
 

@@ -80,10 +80,55 @@ DEVICE_SERVICE_PATCHED=1 DEVICE_SERVICE_TOKEN=prevent-demo-token DEVICE_SERVICE_
   ./.venv/bin/python device-service/app.py
 ```
 
+## Two integration bridges (Dev 1 and Dev 3)
+
+Two thin wrappers expose the loop to the other roles without changing any stage
+logic — they only reuse the existing stage functions.
+
+### `stage_api.py` — JSON-in / JSON-out stage CLI (the subprocess bridge for Dev 1)
+
+Dev 1's TypeScript orchestrator can invoke any security stage as a subprocess and
+parse **one JSON object** off stdout:
+`{"stage", "ok", "data": {...}, "events": [{"actor","text"}...]}`. `data` is a
+superset of the matching orchestrator stub's return shape. Exit code is non-zero
+when `ok` is false.
+
+```bash
+# offline stages (no service, no keys)
+./.venv/bin/python -m security.stage_api ground
+./.venv/bin/python -m security.stage_api scan                     # triage falls back offline
+./.venv/bin/python -m security.stage_api generate --input '{"cveRef":"CVE-2019-6538"}'          # preset (default stop-breathing)
+./.venv/bin/python -m security.stage_api generate --goal "crank the pressure to maximum"        # dynamic (model-authored)
+
+# live stages (need a running device-service at --base-url, default 8071)
+./.venv/bin/python -m security.stage_api deliver --base-url http://127.0.0.1:8071 --payload stop-breathing   # vulnerable -> exploitWorked
+./.venv/bin/python -m security.stage_api verify  --base-url http://127.0.0.1:8071 --payload stop-breathing   # patched   -> passed
+./.venv/bin/python -m security.stage_api restore --base-url http://127.0.0.1:8071
+./.venv/bin/python -m security.stage_api --help
+```
+
+### `emulate_stream.py` — device_status row → serial STATE frames (the bridge for Dev 3)
+
+A faithful Python port of `contracts/src/serial.ts` (`deviceStatusToState` +
+`encodeState`). It turns the shared `device_status` row into the
+`STATE,fan=…,rate=…,hr=…,spo2=…,alarm=…,rgb=…\n` frames the emulator / serial-bridge
+consume, so the loop can drive the emulator with **no board and no realtime
+backend**. STATE frames go to stdout (pipe into the emulator); a human-readable
+board render goes to stderr.
+
+```bash
+# one frame from the row file device-service writes, then exit
+./.venv/bin/python -m security.emulate_stream --row-file /tmp/row.json --once
+
+# follow the row ~4x/sec, emitting a frame on every change — pipe into the emulator
+./.venv/bin/python -m security.emulate_stream --base-url http://127.0.0.1:8071 | <emulator>
+PREVENT_DEVICE_ROW_FILE=/tmp/row.json ./.venv/bin/python -m security.emulate_stream   # --watch is the default
+```
+
 ## Tests
 
 ```bash
-./.venv/bin/python -m pytest security/tests        # 24 tests, ~16s
+./.venv/bin/python -m pytest security/tests        # 49 tests, ~18s
 ```
 
 Covers: the vulnerable crash+lie and the patched 401/ignored-overrides; the
