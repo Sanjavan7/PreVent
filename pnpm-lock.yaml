@@ -45,6 +45,9 @@ importers:
       '@prevent/contracts':
         specifier: workspace:*
         version: link:../contracts
+      '@prevent/realtime':
+        specifier: workspace:*
+        version: link:../realtime
       '@tailwindcss/vite':
         specifier: 4.3.3
         version: 4.3.3(vite@8.3.5(@types/node@26.6.5)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15))
@@ -66,6 +69,9 @@ importers:
       shiki:
         specifier: 4.5.0
         version: 4.5.0
+      spacetimedb:
+        specifier: 2.13.0
+        version: 2.13.0(react@19.3.1)
       tailwindcss:
         specifier: 4.3.3
         version: 4.3.3
