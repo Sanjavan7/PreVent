@@ -44,6 +44,10 @@ uv tool install --python 3.13 bandit==1.9.4
 ./.venv/bin/python security/loop.py --json          # also emit the machine report
 ./.venv/bin/python security/loop.py --payload max-pressure   # stop-breathing | max-pressure | falsify-vitals
 ./.venv/bin/python security/loop.py --port 8071     # device-service port (default 8071)
+
+# DYNAMIC: the model AUTHORS the executable payload from a plain-English goal
+./.venv/bin/python security/loop.py --goal "stop the ventilator but keep the monitor showing healthy vitals"
+./.venv/bin/python security/generate/exploit.py --goal "lower only the displayed SpO2 to 80"   # just print the authored command
 ```
 
 Exit code is `0` **iff** the loop closed (exploit worked, then VERIFY proved it

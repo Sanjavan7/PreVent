@@ -52,7 +52,7 @@ sys.path.insert(0, str(SECURITY_DIR))
 from ground.ground import ground  # noqa: E402
 from scan.run_scanners import run_scanners  # noqa: E402
 from scan.triage import deterministic_triage  # noqa: E402
-from generate.exploit import PAYLOADS, generate_poc  # noqa: E402
+from generate.exploit import PAYLOADS, generate_dynamic_payload, generate_poc  # noqa: E402
 from deliver import deliver_payload, to_wire_body  # noqa: E402
 from verify import fetch_device_status_row, verify_patch  # noqa: E402
 from restore import restore  # noqa: E402
@@ -190,6 +190,7 @@ def run_loop(
     *,
     port: int = 8071,
     payload_id: str = "stop-breathing",
+    goal: str | None = None,
     quiet: bool = False,
     run_dir: Path | None = None,
 ) -> dict[str, Any]:
@@ -250,20 +251,33 @@ def run_loop(
 
         # --- GENERATE ---------------------------------------------------------
         banner("GENERATE")
-        poc = generate_poc(payload_id, chosen)
-        sink.log_event("generate", f"PoC drafted via {poc['source']} (model={poc['modelId']}).")
-        if not quiet:
-            print(f"      PoC: {poc['pocText'][:160]}{'...' if len(poc['pocText'])>160 else ''}")
-        payload = PAYLOADS[next(c for c, p in PAYLOADS.items() if p["id"] == payload_id)]
-        report["stages"]["generate"] = {"poc": poc, "payload": payload}
+        if goal:
+            # DYNAMIC: the model AUTHORS the executable command for this goal.
+            dyn = generate_dynamic_payload(goal, chosen, base_url=svc.base_url)
+            command_to_fire = dyn["command"]
+            payload_ref = f"dynamic:{goal[:48]}"
+            poc_model = dyn["modelId"]
+            sink.log_event("generate", f"Payload AUTHORED by {dyn['source']} ({dyn['modelId']}) for goal: {goal!r}")
+            sink.log_event("generate", f"  command: {json.dumps(command_to_fire)}  |  {dyn['rationale']}")
+            report["stages"]["generate"] = {"mode": "dynamic", "goal": goal, "dynamic": dyn}
+        else:
+            poc = generate_poc(payload_id, chosen)
+            payload = PAYLOADS[next(c for c, p in PAYLOADS.items() if p["id"] == payload_id)]
+            command_to_fire = payload["command"]
+            payload_ref = payload_id
+            poc_model = poc["modelId"]
+            sink.log_event("generate", f"PoC drafted via {poc['source']} (model={poc['modelId']}).")
+            if not quiet:
+                print(f"      PoC: {poc['pocText'][:160]}{'...' if len(poc['pocText'])>160 else ''}")
+            report["stages"]["generate"] = {"mode": "preset", "poc": poc, "payload": payload}
 
         # --- DELIVER (the kill) ----------------------------------------------
         banner("DELIVER")
         before = fetch_device_status_row(base_url=svc.base_url)
-        result = deliver_payload(payload["command"], base_url=svc.base_url)
+        result = deliver_payload(command_to_fire, base_url=svc.base_url)
         sink.log_event(
             "deliver",
-            f"Unauthenticated POST /device/command {json.dumps(to_wire_body(payload['command']))} "
+            f"Unauthenticated POST /device/command {json.dumps(to_wire_body(command_to_fire))} "
             f"-> HTTP {result['statusCode']}.",
         )
         after = fetch_device_status_row(base_url=svc.base_url)
@@ -274,7 +288,7 @@ def run_loop(
             or (not after["fanOn"] and not after["alarmActive"])
         )
         fan_stopped = before["fanOn"] and not after["fanOn"]
-        action = payload["command"]["action"]
+        action = command_to_fire["action"]
         if fan_stopped:
             impact = (
                 f"fan STOPPED; true vitals {after['trueHr']}/{after['trueSpo2']} but device reports "
@@ -283,7 +297,7 @@ def run_loop(
             )
         elif action == "set_rate":
             impact = (
-                f"unauthenticated set_rate accepted (rate={payload['command'].get('rate')}); "
+                f"unauthenticated set_rate accepted (rate={command_to_fire.get('rate')}); "
                 "no auth required — attacker drives the device (CWE-306 over-pressure)."
             )
         else:
@@ -297,8 +311,8 @@ def run_loop(
         sink.record_exploit_run(
             {
                 "findingId": chosen.get("id", 0),
-                "modelId": poc["modelId"],
-                "payloadRef": payload_id,
+                "modelId": poc_model,
+                "payloadRef": payload_ref,
                 "deliveredAt": int(time.time() * 1000),
                 "deviceImpact": impact,
                 "success": exploit_worked,
@@ -326,7 +340,7 @@ def run_loop(
         # --- VERIFY (re-send byte-identical exploit; must now fail) ----------
         banner("VERIFY")
         v_before = fetch_device_status_row(base_url=svc.base_url)
-        outcome = verify_patch(payload["command"], base_url=svc.base_url, status_before=v_before)
+        outcome = verify_patch(command_to_fire, base_url=svc.base_url, status_before=v_before)
         for label, key in (
             ("status is 401/403", "statusCheckPassed"),
             ("true_state unchanged", "trueStateUnchangedPassed"),
@@ -341,8 +355,8 @@ def run_loop(
         sink.record_exploit_run(
             {
                 "findingId": chosen.get("id", 0),
-                "modelId": poc["modelId"],
-                "payloadRef": payload_id,
+                "modelId": poc_model,
+                "payloadRef": payload_ref,
                 "deliveredAt": int(time.time() * 1000),
                 "deviceImpact": "re-run blocked by auth; true_state intact; no lie applied",
                 "success": False,
@@ -384,6 +398,13 @@ def _print_receipt(report: dict[str, Any]) -> None:
         c = s["chosen"]
         print(f" Finding       : {c['scanner']} {c.get('ruleId','')} {c['file']}:{c['line']} (CWE-306)")
     print(f" Self-correct  : {'yes (caught a wrong first pick)' if s.get('selfCorrected') else 'no'}")
+    gen = report["stages"].get("generate", {})
+    if gen.get("mode") == "dynamic":
+        dyn = gen.get("dynamic", {})
+        print(f" Payload       : AUTHORED live by {dyn.get('source','?')} for goal: {gen.get('goal','')!r}")
+        print(f"                 -> {json.dumps(dyn.get('command', {}))}")
+    elif gen.get("mode") == "preset":
+        print(f" Payload       : preset ({gen.get('poc',{}).get('source','?')})")
     print(f" Exploit       : {'control+integrity compromise' if d.get('exploitWorked') else 'did not compromise'}")
     print(f" Verify        : {'PASS — re-run blocked (401/403), state intact, no lie' if v.get('passed') else 'FAIL'}")
     print(f" Loop closed   : {'YES' if report.get('ok') else 'NO'}")
@@ -395,12 +416,14 @@ def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description="PreVent headless security loop (Dev 2).")
     ap.add_argument("--port", type=int, default=int(os.environ.get("DEVICE_SERVICE_PORT", "8071")))
     ap.add_argument("--payload", default="stop-breathing", choices=[p["id"] for p in PAYLOADS.values()])
+    ap.add_argument("--goal", help="attacker goal in plain English -> the model AUTHORS the payload dynamically "
+                                    "(overrides --payload; falls back to a preset if no provider/key)")
     ap.add_argument("--json", action="store_true", help="print the machine-readable report too")
     ap.add_argument("--quiet", action="store_true", help="suppress the step-by-step transcript")
     args = ap.parse_args(argv)
 
     try:
-        report = run_loop(port=args.port, payload_id=args.payload, quiet=args.quiet)
+        report = run_loop(port=args.port, payload_id=args.payload, goal=args.goal, quiet=args.quiet)
     except LoopError as exc:
         print(f"\n[loop] FAILED: {exc}", file=sys.stderr)
         return 1

@@ -248,6 +248,37 @@ def get_device_diag():
     )
 
 
+@app.get("/device/_schema")
+def get_device_schema():
+    """INTERNAL — the device's self-advertised command surface. The dynamic
+    exploit generator reads this live so it authors a payload that fits THIS
+    device (point the generator at a device with a different surface and it
+    adapts). Read-only; off the control surface."""
+    return jsonify(
+        {
+            "service": "device-control-service",
+            "commandEndpoint": {
+                "method": "POST",
+                "path": "/device/command",
+                # Honest reflection of the running mode: the vulnerable build
+                # enforces no auth; the patched build requires a bearer token.
+                "authRequired": DEVICE_SERVICE_PATCHED,
+            },
+            "actions": {
+                "stop_fan": "stop the ventilator fan (patient stops being ventilated)",
+                "set_rate": "set the fan PWM duty; integer field 'rate' in 0..255",
+                "resume": "resume normal ventilation",
+            },
+            "reportedOverrides": {
+                "hr": "int — overrides the DISPLAYED heart rate",
+                "spo2": "int — overrides the DISPLAYED SpO2",
+                "alarm": "bool — overrides whether the device shows an alarm",
+                "_note": "these set what the device DISPLAYS, independent of the true physical state",
+            },
+        }
+    )
+
+
 @app.get("/device/_reset")
 def get_device_reset():
     """INTERNAL — reset the device to the healthy baseline (RESTORE / between

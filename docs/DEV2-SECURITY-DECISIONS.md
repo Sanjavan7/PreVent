@@ -22,7 +22,7 @@ GROUND → SCAN → GENERATE → DELIVER → PATCH → VERIFY → RESTORE
 |---|---|---|
 | **GROUND** | Cite the real advisory (CVE-2019-6538, CWE-306) from NVD, cached locally | `security/ground/ground.py` |
 | **SCAN** | SemGrep (1 real CWE-306 finding) + Bandit (3 decoys); triage self-corrects onto the real one | `device-service/rules/missing-auth.yaml`, `security/scan/` |
-| **GENERATE** | Draft the PoC via any OpenAI-compatible provider (Featherless primary, Bitdeer fallback — both host `DeepSeek-V4.1-Flash-1017`), else a pre-cached PoC | `security/generate/exploit.py` |
+| **GENERATE** | **Author** the executable payload — either a preset (IR-mapped) or **dynamically** from a plain-English goal + the live attack surface — via any OpenAI-compatible provider (Featherless primary, Bitdeer fallback — both host `DeepSeek-V4.1-Flash-1017`), with a validated fallback | `security/generate/exploit.py` |
 | **DELIVER** | Fire the **unauthenticated** payload: fan stops, patient crashes, device keeps reporting normal (the lie) | `security/deliver.py` |
 | **PATCH** | Deploy the patched service (bearer-token required, overrides ignored) — stands in for Factory Droid's diff | `device-service/app.py` (`DEVICE_SERVICE_PATCHED=1`) |
 | **VERIFY** | Re-send the **byte-identical** exploit; assert 401/403 + true_state unchanged + no lie (deterministic, non-AI) | `security/verify.py` |
@@ -60,6 +60,10 @@ Run the whole loop — **no API keys required**:
 ./.venv/bin/python security/loop.py --json     # also print the machine report
 ./.venv/bin/python security/loop.py --payload max-pressure   # stop-breathing (default) | max-pressure | falsify-vitals
 ./.venv/bin/python security/loop.py --port 8071              # device-service port (default 8071)
+
+# DYNAMIC — the model AUTHORS the payload from a plain-English goal (the judge's words):
+./.venv/bin/python security/loop.py --goal "stop the ventilator but keep the monitor showing healthy vitals"
+./.venv/bin/python security/generate/exploit.py --goal "lower only the displayed SpO2 to 80, don't touch the fan"
 ```
 
 Exit code is `0` iff the loop closed (exploit worked, then VERIFY proved it fixed).
@@ -245,6 +249,32 @@ and **falsely pass** (401/403 is the success condition). The default moved to
 `8071` and the reason is documented in `.env.example`. **Why it matters:** this
 would have manifested as "VERIFY passes even with no service running" — the worst
 kind of silent-green bug on stage.
+
+### 3.13a Dynamic payload authoring — "is it only for this CVE?"
+The honest answer a judge should hear is **"no — it curates the payload for the
+case."** `generate_dynamic_payload(goal, finding, base_url)` has the model
+*author the executable command* from three varying inputs: the confirmed
+**finding**, the device's **live-advertised attack surface** (`GET
+/device/_schema`, so point it at a different device and it adapts), and an
+**attacker goal in plain English**. The model returns structured JSON; we
+**validate** it (`validate_command`: action ∈ {stop_fan,set_rate,resume}, rate
+clamped 0–255, override keys whitelisted) and only then fire it — the guardrail
+that keeps a model-authored payload inside the sandboxed device's real action
+set. Demonstrated live (Featherless / DeepSeek):
+
+| Goal (plain English) | Authored command |
+|---|---|
+| stop the ventilator but keep the monitor normal | `{stop_fan, overrides 72/98/alarm off}` |
+| crank the pressure to maximum | `{set_rate: 255}` |
+| lower *only* the displayed SpO2 to 80, don't touch the fan | `{resume, overrides {spo2: 80}}` |
+
+**Why both preset and dynamic:** the 3 IR-mapped presets keep the *hardware*
+beat deterministic (a judge's remote press always fires a known payload), while
+`--goal` proves the generator is **not** hardcoded — a judge can invent a goal
+and watch it curate a new, valid, executable payload. On no provider / refusal /
+invalid output it falls back to a deterministic goal-keyed command, so the demo
+never stalls. The whole loop (`--goal`) runs authored → fired → **verified** end
+to end.
 
 ### 3.13 Separation of duties + honesty framing
 The offensive and trust roles are split across *different models*: an open model
