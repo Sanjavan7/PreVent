@@ -9,6 +9,8 @@
 import { query } from '@anthropic-ai/claude-agent-sdk';
 import type {
   CanUseTool,
+  HookCallbackMatcher,
+  HookEvent,
   McpServerConfig,
   Options,
   PermissionMode,
@@ -48,6 +50,9 @@ export interface RunStageOptions {
   /** Extra in-process MCP servers beyond the always-on `report_decision`
    * server, e.g. the APPLY stage's gated `apply_patch` tool. */
   extraMcpServers?: Record<string, McpServerConfig>;
+  /** Lifecycle hooks for this stage's query(), e.g. the PreToolUse sandbox
+   * guardrail that denies out-of-allowlist tool calls (the refusal beat). */
+  hooks?: Partial<Record<HookEvent, HookCallbackMatcher[]>>;
 }
 
 export interface StageResult {
@@ -97,6 +102,7 @@ export async function runStage(
     canUseTool: opts.canUseTool,
     maxTurns: opts.maxTurns,
     maxBudgetUsd: opts.maxBudgetUsd,
+    hooks: opts.hooks,
   };
 
   try {

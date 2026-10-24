@@ -87,7 +87,8 @@ function sandboxGuardrailHook(backend: RealtimeBackend): HookCallbackMatcher {
     );
 
     const output: HookJSONOutput = {
-      decision: 'block',
+      // PreToolUse blocks via hookSpecificOutput.permissionDecision: 'deny';
+      // the legacy top-level `decision` field is not the operative one here.
       hookSpecificOutput: {
         hookEventName: 'PreToolUse',
         permissionDecision: 'deny',
@@ -100,12 +101,17 @@ function sandboxGuardrailHook(backend: RealtimeBackend): HookCallbackMatcher {
   return { hooks: [hook] };
 }
 
-function baseStageOptions(backend: RealtimeBackend): Pick<RunStageOptions, 'disallowedTools'> {
+function baseStageOptions(backend: RealtimeBackend): Pick<RunStageOptions, 'disallowedTools' | 'hooks'> {
   return {
     // TODO(dev): once Dev 2's stages need Bash/WebFetch for real scans, drop
-    // this to a narrower deny list - the guardrail hook above still catches
+    // this to a narrower deny list - the guardrail hook below still catches
     // any out-of-allowlist network target regardless of what's enabled here.
     disallowedTools: [],
+    // Always-on sandbox guardrail (PLAN-DEV1 task 2 / the "refusal" beat):
+    // denies any tool call targeting a host outside SANDBOX_ALLOWLIST and logs
+    // the visible refusal. Harmless while a stage runs with tools:[] (nothing
+    // to match); fires once a stage enables Bash/WebFetch.
+    hooks: { PreToolUse: [sandboxGuardrailHook(backend)] },
   };
 }
 
