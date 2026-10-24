@@ -1,147 +1,221 @@
-# PreVent — Dev 1 ↔ Dev 2 integration (high-level)
+# PreVent — how the pieces (and the sponsor tech) actually fit together
 
-_A plain-English map of what is built, how the pieces connect, and what actually
-works today. Written for Christian to understand the whole picture at a glance._
+_A high-level explanation of the architecture: what each sponsor technology does,
+where it plugs in, and how they compose into one system. Not a demo script._
 
-Last verified: 2026-10-24 on the Windows dev box (branch `dev1-pipeline-agents`, local).
+Last verified against the source: 2026-10-24.
 
 ---
 
-## 1. What PreVent is (one breath)
+## 1. The core idea: a separation-of-duties trust architecture
 
-An autonomous loop of AI agents that **finds, exploits, patches, and verifies** a
-real security flaw in a medical "Device Control Service" (a fan standing in for a
-ventilator) — and does it with a **human-approval gate** and a **sandbox that
-visibly refuses** to touch anything out of scope. The flaw is CWE-306 (missing
-authentication): anyone can POST a command with no token, stop the fan, and make
-the device keep reporting normal vitals — i.e. the device **lies** while the
-patient crashes.
+PreVent finds a real vulnerability in a medical "Device Control Service," exploits
+it, patches it, and proves the patch holds — autonomously, but with a human
+sign-off. The point that makes it more than a scripted demo is **who is allowed to
+do what**. The sponsor technologies aren't bolted on for prize coverage; each one
+is a *distinct role with distinct trust*, and the system only works because those
+roles are kept apart:
 
-The loop:
+- The model that **writes the exploit** is not the model that **makes decisions**.
+- The agent that **writes the patch** cannot **ship** it.
+- Every state change flows through a **named write-path** that can check *who* is
+  writing — not a shared mutable blob anyone can fake.
+
+So the integration story is really a *trust story*. Here is each role.
+
+---
+
+## 2. The sponsor technologies, by the job they do
+
+### Anthropic — Claude (Agent SDK) · the reasoning + the guardrails
+**Job:** the *trusted* reasoning/narration layer, and the two mechanisms that
+actually enforce safety.
+
+- One top-level `query()` per pipeline stage (`@anthropic-ai/claude-agent-sdk`),
+  streaming **visible thinking** separately from its answer so the dashboard shows
+  the agent reason, state uncertainty, and conclude.
+- Each stage runs with a **scoped identity**: ambient machine config/permissions
+  are stripped (`settingSources:[]`) and tools are granted per stage (most stages
+  get none).
+- Two stages do *real* work, not narration: the **PreToolUse guardrail** denies
+  any tool call reaching a host outside the sandbox allowlist (the visible refusal),
+  and the **`canUseTool` human gate** blocks the patch from being applied until a
+  person clicks approve.
+- **Deliberately not the exploit author, not the patcher, not the decider** — on
+  the live path Claude *restates* decisions the security engine already made. Its
+  prompts explicitly forbid writing exploit code (that both breaks separation of
+  duties and trips server-side safety). The two security-triage stages run on
+  **opus-4-8**, not opus-5-5, precisely because 5-5 blocks this security content.
+
+_Status: implemented. With no API key it falls back to instant placeholder
+narration, so the loop still runs keyless; the real reasoning lights up when
+`ANTHROPIC_API_KEY` is set (verified live)._
+
+### Featherless + Bitdeer — the offensive model · the exploit author
+**Job:** host the *untrusted* open-weight model (`DeepSeek-V4.1-Flash-1017`) that
+actually writes the proof-of-concept exploit.
+
+- Lives entirely in Dev 2's Python (`security/generate/exploit.py`), called over an
+  OpenAI-compatible API. **Featherless is primary; Bitdeer is the fallback** (both
+  serve the same DeepSeek model); a hand-written cached PoC is the final fallback,
+  so GENERATE never hard-fails on a rate-limit, refusal, or missing key.
+- This is the sharp end of the trust split: *a model reading untrusted input and
+  writing offensive code is a different trust domain from the model making
+  decisions.* Claude never imports an exploit client; this model never makes a
+  judgment call. They don't even run in the same process.
+
+_Status: implemented (provider ordering, failover, cached fallback, and validation
+of model-authored commands are real)._
+
+### Factory — Droid (`@factory/droid-sdk`) · the patch engineer
+**Job:** the autonomous engineer that writes the fix — triggered by the
+orchestrator, **not** a human.
+
+- `createSession().stream(...)` runs against the device-service directory,
+  streaming Droid's **plan and real `git diff`** to the dashboard.
+- **Scoped so it cannot commit, push, deploy, or run shell/network commands** —
+  enforced in-process via `AutonomyLevel.Low` + a deny-by-default permission
+  handler. (The repo's `.factory/settings.json` is *inert* for the SDK, so scoping
+  had to be SDK-level — a verified gotcha.)
+- The authority to actually touch the repo is **split into a separate tool**
+  (`apply_patch`) that only runs after the human approve click. A finished Droid
+  turn is explicitly **not** trusted as a fix — it must survive VERIFY.
+- A recorded **cached-patch fallback** guarantees the loop closes if Droid is
+  throttled or offline.
+
+_Status: implemented; the cached fallback is the default in local runs, the live
+Droid path runs with `FACTORY_API_KEY`._
+
+### NVD/CVE + SemGrep + Bandit · ground truth and detection
+**Job:** anchor the vuln in reality and detect it honestly.
+
+- **NVD** grounds the run in a real advisory (CVE-2019-6538, missing-auth on a
+  medical-device command interface) — fetched once and cached, so runs are offline.
+- **SemGrep** (a custom CWE-306 rule) is the real detector = *signal*; **Bandit**
+  is run as *noise/decoy*. The triage step then has to tell real from fake: a static
+  match is **not accepted until a dynamic reproduce-probe** (an actual unauthenticated
+  request) confirms it — keeping detection (static) and confirmation (dynamic) as
+  separate authorities. This is the "starts on the scary Bandit hit, probes it,
+  self-corrects to the SemGrep finding" behavior.
+
+_Status: implemented (needs `semgrep`/`bandit` on PATH; otherwise the triage falls
+back to its deterministic offline verdict)._
+
+### SpacetimeDB (+ Convex fallback) + serial/Arduino · the realtime nervous system
+**Job:** one source-of-truth `device_status` row plus pipeline tables that every
+subsystem subscribes to, and the serial/firmware layer that turns that row into a
+physical fan/LCD/RGB/servo.
+
+- The design is one backend-agnostic `RealtimeBackend` interface with three
+  adapters (Mock / SpacetimeDB / Convex) chosen by env. Writes only ever happen
+  through **named reducers**, and the SpacetimeDB module checks `ctx.sender`
+  identity on the write path — so "only the scan process may record a finding" is
+  **DB-enforceable**, not just narrated. This is the third, strongest leg of the
+  separation of duties.
+- The physical path is a frozen serial contract (`device_status` row →
+  `STATE,fan,rate,hr,spo2,alarm,rgb` frames at 115200 baud) that the Arduino
+  firmware and the Python `emulate_stream` bridge both consume.
+
+_Status: **partial — strong code, not yet running live.** The SpacetimeDB module
+(9 tables + reducers + role checks), the firmware, the serial contract/bridge, and
+the Python emulator bridge are all written and ready. But the live SpacetimeDB
+adapter needs generated `module_bindings` (publish + `spacetime generate`), the
+Convex adapter is a stub, and today **every consumer — the orchestrator, the
+dashboard, the serial bridge — defaults to the Mock backend.** So the loop runs
+end-to-end on an in-memory `MockRealtimeBackend` whose method shapes are identical
+to the reducers; swapping in SpacetimeDB is a one-adapter change, no orchestrator
+edits._
+
+### Armadin / Microsoft / (Fetch.ai)
+- **Armadin:** the verified find→exploit→fix→verify loop *is* their thesis — it's
+  the whole system, not a separate integration.
+- **Microsoft "Built for the Real World":** framing (pre-market/staging security
+  tool with human sign-off).
+- **Fetch.ai / ASI:One:** present as hackathon context but **not currently wired**
+  into PreVent — no Agentverse agent / ACP integration exists in the codebase.
+
+---
+
+## 3. Separation of duties, enforced three ways (all real where running)
+
+This is the claim that holds the architecture together:
+
+1. **Agent-SDK per-stage scoping** — each Claude stage strips ambient permissions,
+   gets only the tools it needs, the human gate (`canUseTool`) guards APPLY, and the
+   PreToolUse guardrail denies out-of-allowlist targets. *(live)*
+2. **Separate OS processes** — the decision model (Claude, TypeScript), the
+   offensive model (DeepSeek via Python), and the patcher (Droid via its own SDK)
+   are different processes with different credentials. *(live)*
+3. **SpacetimeDB reducer identities** — the write path checks `ctx.sender`, so each
+   agent can only write its own tables. *(coded in the module; live once the module
+   is published — today the Mock backend stands in.)*
+
+---
+
+## 4. How the pieces connect (the seams)
+
+- **Dev 1 (orchestrator, TypeScript)** is the conductor. It runs the Claude stages
+  and the Factory Droid patch stage directly, and drives **Dev 2's security engine
+  through one subprocess seam**: `python -m security.stage_api <stage>` returns a
+  single JSON envelope (`{stage, ok, data, events}`). No security logic is
+  re-implemented in TypeScript; no AI-provider client is imported there except
+  Claude.
+- **Dev 2 (security, Python)** owns the real work behind that seam — scanners,
+  triage, the offensive model, delivery, the deterministic verifier, NVD grounding —
+  reusing the exact stage functions its own headless loop uses.
+- **Dev 3 (realtime)** owns the `RealtimeBackend` the orchestrator writes every row
+  and event through. The **shared `device_status` row** (contract camelCase shape)
+  is the single source of truth that drives the hardware, the patient sim, and the
+  dashboard — so nothing can drift or be faked.
+- The **human gate** closes the loop between software and people: the orchestrator's
+  control server exposes an approve endpoint; the dashboard's click is what lets the
+  patch apply.
 
 ```
-GROUND → SCAN → GENERATE → DELIVER → (judge presses IR remote) → PATCH
-       → [sandbox refusal beat] → HUMAN GATE → APPLY → VERIFY → RESTORE
+            ┌─────────────── Dev 1 orchestrator (TS, the conductor) ───────────────┐
+  Claude ───┤ narration + PreToolUse guardrail + canUseTool human gate             │
+  (Agent SDK)│                                                                      │
+  Factory ──┤ Droid patch stage (scoped, streamed) → apply_patch (human-gated)     │
+   Droid    │                                                                      │
+            │   │ subprocess seam: python -m security.stage_api <stage> → JSON      │
+            └───┼──────────────────────────────────────────────────────────────────┘
+                ▼
+        Dev 2 security engine (Python): NVD ground · SemGrep/Bandit + triage ·
+        DeepSeek exploit (Featherless→Bitdeer→cached) · deliver · deterministic verify
+                │
+                ▼ writes every row/event through
+        RealtimeBackend  →  [ Mock (live today) | SpacetimeDB (ready) | Convex (stub) ]
+                │  one shared device_status row
+                ▼
+        serial bridge → Arduino firmware (fan/LCD/RGB/servo)  ·  patient sim  ·  dashboard
 ```
 
 ---
 
-## 2. Who owns what
+## 5. What's live vs. coded-but-not-running (honest status)
 
-| Role | Owns | Language |
-|------|------|----------|
-| **Dev 1 (you/me)** | The **orchestrator** — the conductor that runs the loop, streams agent reasoning, enforces the human gate + sandbox refusal, runs the Factory Droid patch stage, manages timing. | TypeScript (`agents/`) |
-| **Dev 2 (Israel)** | The **real security logic** — scanners, triage, exploit generation, delivery, deterministic verification, and the Flask device-service itself. | Python (`security/`, `device-service/`) |
-| **Dev 3** | Realtime + dashboard + hardware (SpacetimeDB, the physical fan/board). | (separate) |
-
-**The whole point:** Dev 1 doesn't *reimplement* security in TypeScript. It
-**drives** Dev 2's Python as a subprocess and narrates/gates/visualizes it.
-
----
-
-## 3. The seam between Dev 1 and Dev 2 (the decision Israel asked about)
-
-**Decision: subprocess CLI — and it's already built.** Israel built
-`security/stage_api.py`. The orchestrator runs:
-
-```
-python -m security.stage_api <ground|scan|generate|deliver|verify|restore> [--base-url …] [--input …] [--payload …]
-```
-
-Each call prints **one JSON object** `{stage, ok, data, events}` on stdout. `data`
-is a superset of the shape the orchestrator expects; `events` is the narration
-trail (the triage reasoning, the observed device impact, the verify checklist)
-which the orchestrator logs straight onto the dashboard.
-
-On the Dev 1 side this lives in `agents/src/security/stages.ts`:
-- `MockSecurityStages` — the **default**. Returns canned shapes so the whole loop
-  runs with **zero Python, zero keys** (for quick dashboard/UI work).
-- `PythonSecurityStages` — the **real path**, switched on with
-  `PREVENT_SECURITY=python`. Shells out to `stage_api`. If Python is missing or a
-  call fails, it **falls back to the mock** so a demo never hard-crashes.
-
-This is the only contract the two sides share. Either can be rebuilt behind it.
+| Piece | Status |
+|------|--------|
+| Full loop GROUND..RESTORE on the Mock backend | ✅ live, ~0.3s mock / ~11s real security |
+| Claude narration + guardrail + human gate | ✅ live (keyless → placeholder; real with key) |
+| Offensive model (Featherless→Bitdeer→cached) | ✅ live (cached without keys) |
+| Factory Droid patch (cached fallback / live) | ✅ cached live; real Droid with key |
+| NVD grounding + SemGrep/Bandit + triage | ✅ live (scanners on PATH) |
+| SpacetimeDB module + reducers + firmware + serial | 🟡 written & ready, **not running** (needs publish/`generate`; Mock stands in) |
+| Convex adapter | 🟡 stub |
+| Fetch.ai / ASI:One | ⬜ not integrated |
 
 ---
 
-## 4. What happens each stage (and who does it)
-
-| Stage | What happens | Who |
-|------|--------------|-----|
-| **GROUND** | Pull the real CVE this is modeled on (CVE-2019-6538, a Medtronic CWE-306) with CVSS/CWE context. | Dev 2 (`ground.py`) |
-| **SCAN** | Run SemGrep + Bandit, then **triage**: it deliberately starts on a tempting Bandit decoy (a HIGH "weak MD5" smell), *probes* it, finds it isn't exploitable, **self-corrects**, and lands on the real SemGrep CWE-306 finding. | Dev 2 (`run_scanners.py` + `triage.py`) |
-| **GENERATE** | Author a proof-of-concept payload (a model writes it live via Featherless; falls back to a cached PoC with no key). | Dev 2 (`exploit.py`) |
-| **DELIVER** | Fire the unauthenticated command at the live device-service → fan stops, true vitals crater (38/61) while the device still reports 72/98 and never alarms. | Dev 2 (`deliver.py`) → the orchestrator pushes the resulting device row to the dashboards/hardware. |
-| **IR event** | A judge physically presses an IR remote to trigger the attack (injected via the control server's `/ir` route if no hardware). | Dev 3 / orchestrator |
-| **PATCH** | **Factory Droid** proposes a scoped diff that adds auth. It streams its reasoning and **cannot commit, push, or deploy** (deny-by-default). | Dev 1 (`factory/runDroid.ts`) |
-| **Sandbox refusal** | An agent reaches for a *second* ventilator outside the allowlist — the guardrail **denies it on screen**: `ACTION REFUSED — out of scope`. | Dev 1 (`guardrail.ts`) |
-| **HUMAN GATE** | Nothing is applied until a human clicks **APPROVE & DEPLOY** on the dashboard (POST `/approve`). No auto-timer in a real run. | Dev 1 (`humanGate.ts` + `controlServer.ts`) |
-| **APPLY** | The approved patch is applied to the device-service. | Dev 1 (`tools/apply_patch.ts`) |
-| **VERIFY** | Re-run the exact exploit against the **patched** service → now rejected (HTTP 401), true state unchanged, no lie. A verifier that always passes is worthless, so this is deterministic. | Dev 2 (`verify.py`) |
-| **RESTORE** | Revert the device-service to its clean vulnerable state so the whole thing can run again 10+ times for roving judges. | Dev 1 (git-scoped revert) + Dev 2 (healthy reset) |
-
-**One subtlety Dev 1 handles for the real demo:** when Droid patches `app.py`, the
-*running* Flask process still holds the old code. So before VERIFY the orchestrator
-**restarts the device-service in patched mode** (`DeviceServiceController`). That's
-why VERIFY actually sees the fix instead of a stale process.
-
----
-
-## 5. What works **today** (verified, not aspirational)
-
-Run on this Windows box, branch `dev1-pipeline-agents`:
-
-- ✅ **Full loop, mock mode, zero keys** — completes in ~0.3s; the sandbox refusal
-  fires with the exact `ACTION REFUSED — out of scope` wording.
-- ✅ **Repeatability** — 10/10 runs, max ~0.35s (well under the 90s budget).
-- ✅ **Full loop, REAL Python security** (`PREVENT_SECURITY=python`) — completes
-  end-to-end in ~11s with the orchestrator managing the device-service:
-  - GROUND real CVE card ✓
-  - SCAN real (SemGrep 1 + Bandit 3) with the **self-correcting triage** visible ✓
-  - GENERATE real cached PoC ✓
-  - DELIVER real exploit → HTTP 200, fan off, device lying ✓
-  - restart patched → VERIFY real → **HTTP 401, all checks pass** ✓
-  - RESTORE clean ✓
-- ✅ **Dev 2's full test suite: 49/49 passing** on this machine.
-- ✅ **Droid patch path** — cached fallback diff applies cleanly; the gate blocks
-  until approval; Droid is sandboxed from commit/push/deploy.
-- ✅ TypeScript typechecks clean.
-
-### What still needs doing (honest list)
-- **Dev 3 realtime/hardware** — the dashboard + SpacetimeDB + physical fan.
-  (`emulate_stream.py` already bridges the device row to serial frames with no board.)
-- **Live Claude narration** — now exercised with a real `ANTHROPIC_API_KEY`: each
-  stage streams real reasoning that matches the deterministic result (SCAN explains
-  the triage choice, VERIFY confirms 401/patch-holds, the refusal beat narrates the
-  sandbox denial). Narration prompts describe the already-completed stage result
-  (they don't ask Claude to re-verify with no tools, which made it refuse). Non-fatal
-  and on opus-4-8, not opus-5-5 (5-5 blocks this security content). **Live Factory
-  Droid** (`FACTORY_API_KEY`) still runs the cached-fallback patch here; exercise the
-  real Droid path at the demo.
-- **Merge Israel's PR #2** (the `stage_api`/`emulate_stream` bridges) into `main`
-  — currently integrated **locally** on this branch; GitHub says it merges cleanly.
-- **A couple of Dev 2-side robustness nits** (worth telling Israel): the Windows
-  cp1252 decode in `run_scanners.py` — worked around from our side with UTF-8 mode,
-  but cleaner to fix at source; and a partial-row edge case in `verify.py`'s public
-  fallback. Neither blocks the demo.
-
----
-
-## 6. How to run it yourself
+## 6. Run it
 
 ```bash
-# Mock loop, no keys, instant:
 cd agents
+# Mock loop, no keys:
 ANTHROPIC_API_KEY= FACTORY_API_KEY= pnpm dev
-
-# Real security loop (needs the Python venv + semgrep/bandit on PATH):
-ANTHROPIC_API_KEY= FACTORY_API_KEY= \
-  PREVENT_SECURITY=python \
-  PREVENT_PYTHON="<repo>/.venv/Scripts/python.exe" \
-  pnpm dev
-
-# Dev 2 tests:
-PYTHONUTF8=1 <repo>/.venv/Scripts/python.exe -m pytest security/tests -q
+# Real security engine (needs the 3.13 venv + semgrep/bandit on PATH):
+PREVENT_SECURITY=python PREVENT_PYTHON="<repo>/.venv/Scripts/python.exe" pnpm dev
+# Dev 2 tests:  PYTHONUTF8=1 <repo>/.venv/Scripts/python.exe -m pytest security/tests -q
 ```
 
-The device-service runs on **port 8071** (not 5000 — macOS reserves that for AirPlay).
+Device-service runs on **port 8071** (macOS reserves 5000 for AirPlay).
