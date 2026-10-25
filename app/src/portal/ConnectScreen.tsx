@@ -91,9 +91,9 @@ export function ConnectScreen({ pipeline, onStart }: { pipeline: Pipeline; onSta
               onChange={(e) => setRepoUrl(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && useRepo()}
               placeholder="org/repo"
-              className="min-w-0 flex-1 bg-transparent py-2 font-mono text-sm text-text outline-none focus:outline-none focus-visible:outline-none placeholder:text-text-muted"
+              className="no-ring min-w-0 flex-1 bg-transparent py-2 font-mono text-sm text-text placeholder:text-text-muted"
             />
-            <button type="button" onClick={useRepo} className="press shrink-0 text-meta font-medium text-accent-fg focus-visible:outline-none">
+            <button type="button" onClick={useRepo} className="press no-ring shrink-0 text-meta font-medium text-accent-fg">
               use
             </button>
           </div>

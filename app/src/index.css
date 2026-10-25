@@ -249,6 +249,12 @@ body {
   outline-offset: 2px;
   border-radius: var(--radius-sm);
 }
+/* Opt out of the global ring where a parent already shows focus (field wrapper).
+   Unlayered so it beats the global rule above, which Tailwind utilities cannot. */
+.no-ring:focus-visible,
+.no-ring:focus {
+  outline: none;
+}
 
 /* ---------- The gray spinner — the ONLY neutral in-progress indicator ---------- */
 .spinner {
