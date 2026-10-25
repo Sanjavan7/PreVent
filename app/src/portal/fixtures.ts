@@ -14,13 +14,13 @@ export const SIM_TARGET: Target = {
     { path: 'firmware/uno_actuator.ino', lang: 'cpp', loc: 378 },
   ],
   plantedVulns: [
-    { id: 'srv-auth', title: 'Unauthenticated device command channel', cwe: 'CWE-306', cveRef: 'CVE-2019-6538', file: 'device-service/app.py', line: 333, severity: 'critical', note: 'POST /device/command has no token check — any caller can command the device.' },
+    { id: 'srv-auth', title: 'Unauthenticated device command channel', cwe: 'CWE-306', cveRef: 'CVE-2019-6538', file: 'device-service/app.py', line: 229, severity: 'critical', note: 'POST /device/command has no token check — any caller can command the device.' },
     { id: 'fw-serial', title: 'Unauthenticated serial control channel', cwe: 'CWE-306', cveRef: 'CVE-2019-6538', file: 'firmware/uno_actuator.ino', line: 248, severity: 'critical', note: 'Firmware applies host STATE frames with no auth on the serial link.' },
   ] satisfies PlantedVuln[],
 };
 
 export const SIM_FINDINGS: ScanFinding[] = [
-  { id: 1, scanner: 'semgrep', target: 'device-service', file: 'device-service/app.py', line: 333, severity: 'ERROR', ruleId: 'flask-missing-auth-decorator', message: 'State-changing route POST /device/command has no authentication guard.', cveRef: 'CVE-2019-6538', cwe: 'CWE-306' },
+  { id: 1, scanner: 'semgrep', target: 'device-service', file: 'device-service/app.py', line: 229, severity: 'ERROR', ruleId: 'flask-missing-auth-decorator', message: 'State-changing route POST /device/command has no authentication guard.', cveRef: 'CVE-2019-6538', cwe: 'CWE-306' },
   { id: 2, scanner: 'bandit', target: 'device-service', file: 'device-service/diagnostics.py', line: 20, severity: 'LOW', ruleId: 'B105', message: 'Possible hardcoded password: "device-diag-0000".' },
   { id: 3, scanner: 'bandit', target: 'device-service', file: 'device-service/diagnostics.py', line: 26, severity: 'HIGH', ruleId: 'B324', message: 'Use of weak MD5 hash for security. Consider usedforsecurity=False.' },
   { id: 4, scanner: 'bandit', target: 'device-service', file: 'device-service/diagnostics.py', line: 34, severity: 'LOW', ruleId: 'B110', message: 'try/except/pass detected.' },
@@ -190,30 +190,27 @@ export interface CodeExcerpt {
 
 export const SIM_CODE: Record<string, CodeExcerpt> = {
   'device-service/app.py': {
-    startLine: 320,
-    content: `        # and the alarm honestly reflects a stopped fan.
-        reported_state["reported_hr"] = true_state["true_hr"]
-        reported_state["reported_spo2"] = true_state["true_spo2"]
-        reported_state["alarm_active"] = not true_state["fan_on"]
+    startLine: 219,
+    content: `@app.get("/device/_reset")
+def get_device_reset():
+    """INTERNAL — reset the device to the healthy baseline. A maintenance hook,
+    exposed as a GET and kept off the device control surface."""
+    reset_healthy()
+    return jsonify(current_row())
 
-        _sync_and_push(action)
-        return jsonify({"ok": True, "fan_on": true_state["fan_on"]})
 
-else:
-    # VULNERABLE handler — CWE-306: Missing Authentication for Critical Function.
-    # No auth decorator / token check at all. This is the function
-    # rules/missing-auth.yaml is written to fire on.
-    # ruleid: flask-missing-auth-decorator
-    @app.post("/device/command")
-    def device_command():
-        body = request.get_json(silent=True) or {}
-        action: Optional[str] = body.get("action")
-        reported_overrides: dict[str, Any] = (
-            body.get("reported_overrides") or body.get("reportedOverrides") or {}
-        )
-        rate: Optional[int] = body.get("rate")
+# Device command handler: applies a command to the unit and updates the
+# reported vitals/alarm the display shows.
+@app.post("/device/command")
+def device_command():
+    body = request.get_json(silent=True) or {}
+    action: Optional[str] = body.get("action")
+    reported_overrides: dict[str, Any] = (
+        body.get("reported_overrides") or body.get("reportedOverrides") or {}
+    )
+    rate: Optional[int] = body.get("rate")
 
-        err = _apply_physiology(action, rate)`,
+    err = _apply_physiology(action, rate)`,
   },
   'firmware/uno_actuator.ino': {
     startLine: 247,
