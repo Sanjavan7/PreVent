@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" fill="currentColor" role="img" aria-label="PreVent mono">
+  <mask id="c1m">
+    <rect width="512" height="512" fill="black"/>
+    <!-- shield solid -->
+    <path d="M256 44 L432 108 L432 252 C432 360 356 436 256 470 C156 436 80 360 80 252 L80 108 Z" fill="white"/>
+    <!-- pulse carved out -->
+    <path d="M100 266 H168 L192 238 L216 294 L252 132 L288 388 L318 266 H420"
+          fill="none" stroke="black" stroke-width="28"
+          stroke-linecap="round" stroke-linejoin="round"/>
+  </mask>
+  <rect width="512" height="512" mask="url(#c1m)"/>
+</svg>
