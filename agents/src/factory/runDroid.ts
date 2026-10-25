@@ -54,15 +54,41 @@ export interface RunDroidResult {
   subtype?: string;
 }
 
-const DEFAULT_PROMPT =
-  'Fix CWE-306 on POST /device/command: require a valid token and ignore untrusted reported_overrides. Edit only app.py.';
+/**
+ * FROZEN writer prompt (blueprint §5c). Governs both the live writer session
+ * and the recorder. Note the env var is DEVICE_SERVICE_TOKEN (what loop.py /
+ * the portal actually set), NOT the skill's DEVICE_CONTROL_TOKEN. The decorator
+ * requirement is load-bearing: an inline in-body check does not silence the
+ * SemGrep `flask-missing-auth-decorator` rule (see §5a).
+ */
+export const DEFAULT_PROMPT = `Fix the CWE-306 missing-authentication flaw on POST /device/command in app.py.
+Requirements:
+- Require a bearer token on that route. Read the expected secret from the
+  DEVICE_SERVICE_TOKEN environment variable; never hard-code it. If that env var
+  is unset, fail CLOSED (reject), never fail open.
+- Reject requests: 401 when the bearer token is missing, 403 when it is present
+  but wrong (or when no server token is configured).
+- Apply the guard as a DECORATOR stacked directly above the @app.post route
+  handler (e.g. @require_token), NOT as an inline check inside the function body.
+- Stop trusting client input: ignore any reported_overrides / reportedOverrides,
+  and make reported_state mirror true_state (reported hr/spo2 == true hr/spo2,
+  alarm = not fan_on) so the caller can never desync the reported view.
+- Do not change the legitimate behavior of stop_fan / set_rate / resume for an
+  authenticated caller, and never block the resume/recover path.
+- Edit ONLY app.py (plus a tiny auth helper in the same file if needed). Add no
+  new endpoints, touch no other file, keep the diff minimal, leave a one-line
+  comment citing CWE-306.`;
 
 /** Shape of `cached-patch.json` (loaded at runtime, see `loadCachedPatch`). */
-interface CachedPatch {
+export interface CachedPatch {
   droidSession: string;
   text: string;
   diff: string;
 }
+
+/** Sink for the "Droid Shield" beat: each denied command is reported here so a
+ * caller (the patch runner) can emit a `shield_blocked` JSONL event. */
+export type ShieldSink = (block: { command: string; reason: string }) => void;
 
 /** Command families Droid must never run in this demo. We DENY every command
  * that reaches the handler regardless; matching one of these just makes the
@@ -73,7 +99,7 @@ const FORBIDDEN_COMMAND_RE =
 /** Broadened fallback matcher (PLAN-DEV1 task 4 - the loop must ALWAYS close):
  * rate limits, offline/DNS/connection failures, missing binaries, permission
  * errors - anything that means "Droid is not usable right now". */
-function shouldFallback(err: unknown): boolean {
+export function shouldFallback(err: unknown): boolean {
   const message = err instanceof Error ? err.message : String(err);
   return /429|rate.?limit|ENOENT|not found|ECONN|ETIMEDOUT|offline|spawn|EACCES/i.test(message);
 }
@@ -94,24 +120,33 @@ async function scopeLog(backend: RealtimeBackend | undefined, text: string): Pro
  * read-only commands are auto-approved and never reach this handler, so Droid
  * can still edit app.py; everything mutating/shell routes here and is always
  * cancelled. A thrown handler also defaults to Cancel, so we fail closed.
+ *
+ * `onBlock` (optional) receives the command + reason for each denied tool use so
+ * the patch runner can surface the "Droid Shield blocked" beat as a
+ * `shield_blocked` JSONL event (blueprint §1 / §6a).
  */
-function makePermissionHandler(backend?: RealtimeBackend) {
+export function makePermissionHandler(opts?: { backend?: RealtimeBackend; onBlock?: ShieldSink }) {
+  const backend = opts?.backend;
+  const onBlock = opts?.onBlock;
   return async (params: RequestPermissionRequestParams): Promise<RequestPermissionHandlerResult> => {
     try {
       for (const tu of params.toolUses) {
         const details = tu.details;
-        let label: string;
+        let command: string;
+        let reason: string;
         if (details.type === ToolConfirmationType.Execute) {
           const extracted = details.extractedCommands ?? [];
-          const command = details.fullCommand || details.command || extracted.join(' ');
+          command = details.fullCommand || details.command || extracted.join(' ');
           const haystack = `${details.fullCommand} ${details.command} ${extracted.join(' ')}`;
-          label = FORBIDDEN_COMMAND_RE.test(haystack)
-            ? `${command} [forbidden: git/push/commit/remote/config/clone/deploy/curl/wget/ssh/scp/nc/sudo]`
-            : command;
+          reason = FORBIDDEN_COMMAND_RE.test(haystack)
+            ? 'forbidden: git/push/commit/remote/config/clone/deploy/curl/wget/ssh/scp/nc/sudo (deny-by-default scope)'
+            : 'deny-by-default scope';
         } else {
-          label = tu.toolUse.name;
+          command = tu.toolUse.name;
+          reason = 'deny-by-default scope';
         }
-        await scopeLog(backend, `Droid command blocked by scope: ${label}`);
+        await scopeLog(backend, `Droid command blocked by scope: ${command} [${reason}]`);
+        onBlock?.({ command, reason });
       }
     } catch {
       return ToolConfirmationOutcome.Cancel;
@@ -129,18 +164,22 @@ function makePermissionHandler(backend?: RealtimeBackend) {
 export function buildSessionOptions(
   deviceServiceDir: string,
   backend?: RealtimeBackend,
+  extra?: { modelId?: string; onBlock?: ShieldSink },
 ): CreateSessionOptions {
   return {
     cwd: deviceServiceDir,
     autonomyLevel: AutonomyLevel.Low,
-    permissionHandler: makePermissionHandler(backend),
+    // Pin a model id so an over-cautious CLI default cannot silently refuse the
+    // cyber patch prompt (blueprint §6d). Undefined -> SDK default.
+    modelId: extra?.modelId ?? process.env.FACTORY_DROID_MODEL,
+    permissionHandler: makePermissionHandler({ backend, onBlock: extra?.onBlock }),
   };
 }
 
 /** Loads the pre-recorded fallback patch next to this module. Uses
  * `readFileSync` relative to `import.meta.url` rather than a JSON import
  * assertion, which is brittle under tsx/ESM. */
-function loadCachedPatch(): CachedPatch {
+export function loadCachedPatch(): CachedPatch {
   const jsonPath = path.join(path.dirname(fileURLToPath(import.meta.url)), 'cached-patch.json');
   return JSON.parse(readFileSync(jsonPath, 'utf8')) as CachedPatch;
 }
@@ -241,8 +280,10 @@ export async function runDroid(
   }
 }
 
-/** The git diff artifact `recordPatchAttempt`'s `diffRef` points to. */
-async function captureGitDiff(deviceServiceDir: string): Promise<string> {
+/** The git diff artifact `recordPatchAttempt`'s `diffRef` points to. Captures
+ * the device-service diff as a plain (git-header-stripped) unified diff; reused
+ * by the patch runner (blueprint §6a). */
+export async function captureGitDiff(deviceServiceDir: string): Promise<string> {
   // --relative + the `.` pathspec scope the diff to device-service and emit
   // device-service-RELATIVE paths (a/app.py, not a/device-service/app.py), so
   // the captured diff applies under `git -C device-service apply` (-p1) and

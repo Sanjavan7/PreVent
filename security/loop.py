@@ -125,7 +125,10 @@ class DeviceService:
         self.proc: subprocess.Popen[Any] | None = None
         self.mode: str | None = None
 
-    def start(self, *, patched: bool) -> None:
+    def start(self, patched: bool | None = None) -> None:
+        # Patched-ness is now a property of the file bytes on disk (the patch
+        # stage edits app.py), not an env flag. `patched` is accepted only for
+        # back-compat / the log filename and otherwise ignored.
         self.stop()
         env = dict(os.environ)
         env.update(
@@ -133,8 +136,7 @@ class DeviceService:
                 "DEVICE_SERVICE_HOST": self.host,
                 "DEVICE_SERVICE_PORT": str(self.port),
                 "PREVENT_DEVICE_ROW_FILE": str(self.row_file),
-                "DEVICE_SERVICE_PATCHED": "1" if patched else "0",
-                "DEVICE_SERVICE_TOKEN": DEMO_TOKEN if patched else "",
+                "DEVICE_SERVICE_TOKEN": DEMO_TOKEN,
             }
         )
         self.mode = "patched" if patched else "vulnerable"

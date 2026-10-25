@@ -23,11 +23,19 @@ const STAGE_WORD: Record<string, string> = {
   fan_ready: 'fan exploit ready',
   flashing_fan: 'flashing the board',
   fan_breached: 'fan stopped',
+  patching: 'Droid writing the fix',
+  reviewing: 'reviewer auditing the diff',
+  awaiting_approval: 'awaiting your approval',
+  applying: 'deploying the fix',
+  verifying: 're-running the exploit',
+  verified: 'exploit blocked — 401',
+  patch_failed: 'patch did not hold',
+  patch_rejected: 'patch rejected',
 };
 
 export function PortalApp() {
   const pipeline = usePipeline();
-  const { mode, phase, hardware, agents, findings, ranking, authorAgents, exploitStage, serverBreach, fanBreach, startScan, startExploit, sendToServer, sendToFan, reset } = pipeline;
+  const { mode, phase, hardware, agents, findings, ranking, authorAgents, exploitStage, serverBreach, fanBreach, patchAgent, reviewAgent, approved, verifyResult, startScan, startExploit, sendToServer, sendToFan, startPatch, approve, reject, reset } = pipeline;
 
   const [selected, setSelected] = useState<ScanFinding | null>(null);
   const [selectedNode, setSelectedNode] = useState<string | null>(null);
@@ -38,12 +46,15 @@ export function PortalApp() {
     if (top) setSelected(top);
   }, [findings, ranking, selected]);
 
-  // Follow the two-stage attack beats.
+  // Follow the two-stage attack, then the remediation beats.
   useEffect(() => {
     if (exploitStage === 'curating_server') setSelectedNode('author-server');
     else if (exploitStage === 'server_breached') setSelectedNode('server');
     else if (exploitStage === 'curating_fan') setSelectedNode('author-fan');
     else if (exploitStage === 'fan_breached') setSelectedNode('fan');
+    else if (exploitStage === 'patching') setSelectedNode('writer');
+    else if (exploitStage === 'reviewing' || exploitStage === 'awaiting_approval') setSelectedNode('reviewer');
+    else if (exploitStage === 'verifying' || exploitStage === 'verified' || exploitStage === 'patch_failed') setSelectedNode('verify');
   }, [exploitStage]);
 
   const onReset = useCallback(() => {
@@ -60,8 +71,8 @@ export function PortalApp() {
           : phase === 'review' ? 'review'
             : hardware.connected ? 'ready' : 'waiting';
 
-  const selNode = buildGraph(authorAgents, exploitStage, serverBreach, fanBreach).nodes.find((n) => n.id === selectedNode) ?? null;
-  const live = exploitStage === 'curating_server' || exploitStage === 'curating_fan' || exploitStage === 'breaching_server' || exploitStage === 'flashing_fan';
+  const selNode = buildGraph(authorAgents, exploitStage, serverBreach, fanBreach, { writer: patchAgent, reviewer: reviewAgent, verify: verifyResult }).nodes.find((n) => n.id === selectedNode) ?? null;
+  const live = exploitStage === 'curating_server' || exploitStage === 'curating_fan' || exploitStage === 'breaching_server' || exploitStage === 'flashing_fan' || exploitStage === 'patching' || exploitStage === 'reviewing' || exploitStage === 'verifying';
 
   return (
     <div className="flex h-full flex-col bg-bg text-text">
@@ -90,6 +101,11 @@ export function PortalApp() {
               Send to fan — flash board
             </button>
           )}
+          {exploitStage === 'fan_breached' && (
+            <button type="button" onClick={startPatch} className="press state-transition rounded-md bg-accent-bg px-3 py-1.5 text-sm font-medium text-accent-fg hover:bg-surface-3">
+              Generate fix (Droid)
+            </button>
+          )}
           {phase === 'review' && (
             <button type="button" onClick={startExploit} className="press state-transition rounded-md bg-accent-bg px-3 py-1.5 text-sm font-medium text-accent-fg hover:bg-surface-3">
               Generate exploits
@@ -112,8 +128,8 @@ export function PortalApp() {
         <ConnectScreen pipeline={pipeline} onStart={startScan} />
       ) : phase === 'exploit' ? (
         <main className="grid min-h-0 flex-1 grid-cols-1 gap-3 px-3 pb-3 lg:grid-cols-[minmax(0,1.7fr)_minmax(340px,1fr)]">
-          <AgentGraph authors={authorAgents} stage={exploitStage} serverBreach={serverBreach} fanBreach={fanBreach} selectedId={selectedNode} onSelect={setSelectedNode} />
-          <AgentDetail node={selNode} findings={findings} serverBreach={serverBreach} fanBreach={fanBreach} />
+          <AgentGraph authors={authorAgents} stage={exploitStage} serverBreach={serverBreach} fanBreach={fanBreach} patchAgent={patchAgent} reviewAgent={reviewAgent} verifyResult={verifyResult} selectedId={selectedNode} onSelect={setSelectedNode} />
+          <AgentDetail node={selNode} findings={findings} serverBreach={serverBreach} fanBreach={fanBreach} stage={exploitStage} approved={approved} onApprove={approve} onReject={reject} />
         </main>
       ) : (
         <main className="flex min-h-0 flex-1 flex-col gap-3 px-3 pb-3">
