@@ -1,7 +1,6 @@
-// PreVent — the security console. It starts from real hardware, scans the
-// device's actual code with real Semgrep/Bandit (honest timing), and lets you
-// click any ranked finding straight into the vulnerable source. The spawning
-// scanner fleet and the code are the two things worth watching.
+// PreVent — the security console. Real hardware -> real scan -> ranked findings
+// that open the vulnerable code -> spawn one DeepSeek author agent per
+// exploitable finding, shown as a clickable spatial graph.
 
 import { useCallback, useEffect, useState } from 'react';
 import type { ScanFinding } from './api';
@@ -10,11 +9,16 @@ import { ConnectScreen } from './ConnectScreen';
 import { ScanStrip } from './scan/ScanStrip';
 import { FindingsList } from './review/FindingsList';
 import { CodeViewer } from './review/CodeViewer';
+import { AgentGraph } from './exploit/AgentGraph';
+import { AgentDetail } from './exploit/AgentDetail';
+import { buildGraph } from './exploit/graphModel';
 
 export function PortalApp() {
   const pipeline = usePipeline();
-  const { mode, phase, hardware, agents, findings, ranking, startScan, reset } = pipeline;
+  const { mode, phase, hardware, agents, findings, ranking, authorAgents, startScan, startExploit, reset } = pipeline;
+
   const [selected, setSelected] = useState<ScanFinding | null>(null);
+  const [selectedNode, setSelectedNode] = useState<string | null>(null);
 
   // Open the top-ranked finding automatically once ranking lands.
   useEffect(() => {
@@ -23,13 +27,29 @@ export function PortalApp() {
     if (top) setSelected(top);
   }, [findings, ranking, selected]);
 
+  // On entering the exploit phase, select the first author node by default.
+  useEffect(() => {
+    if (phase !== 'exploit') return;
+    if (selectedNode) return;
+    const first = buildGraph(authorAgents).nodes.find((n) => n.kind === 'author');
+    setSelectedNode(first?.id ?? 'deepseek');
+  }, [phase, authorAgents, selectedNode]);
+
   const onReset = useCallback(() => {
     setSelected(null);
+    setSelectedNode(null);
     reset();
   }, [reset]);
 
-  const working = phase === 'scanning' || phase === 'review';
-  const statusWord = mode === 'connecting' ? 'connecting' : phase === 'scanning' ? 'scanning' : phase === 'review' ? 'review' : hardware.connected ? 'ready' : 'waiting';
+  const working = phase !== 'connect' && phase !== 'ready';
+  const statusWord =
+    mode === 'connecting' ? 'connecting'
+      : phase === 'scanning' ? 'scanning'
+        : phase === 'review' ? 'review'
+          : phase === 'exploit' ? 'exploiting'
+            : hardware.connected ? 'ready' : 'waiting';
+
+  const selNode = buildGraph(authorAgents).nodes.find((n) => n.id === selectedNode) ?? null;
 
   return (
     <div className="flex h-full flex-col bg-bg text-text">
@@ -37,10 +57,10 @@ export function PortalApp() {
       <header className="flex items-center justify-between gap-4 px-5 py-3">
         <div className="flex items-center gap-4">
           <span className="text-lg font-bold tracking-tight">
-            Pre<span className="text-brand">Vent</span>
+            Pre<span className="text-success">Vent</span>
           </span>
           <span className="flex items-center gap-2">
-            <span className={`gem ${hardware.connected ? 'text-success' : 'text-text-muted'} ${phase === 'scanning' ? 'gem--live text-accent' : ''}`} style={{ width: 7, height: 7 }} />
+            <span className={`gem ${hardware.connected ? 'text-success' : 'text-text-muted'} ${phase === 'scanning' || phase === 'exploit' ? 'gem--live text-accent' : ''}`} style={{ width: 7, height: 7 }} />
             <span className="text-meta text-text-secondary">{statusWord}</span>
           </span>
           {hardware.connected && (
@@ -52,7 +72,12 @@ export function PortalApp() {
 
         <div className="flex items-center gap-2">
           {phase === 'review' && (
-            <button type="button" onClick={startScan} className="press state-transition rounded-md bg-accent-bg px-3 py-1.5 text-sm font-medium text-accent-fg hover:bg-surface-3">
+            <button type="button" onClick={startExploit} className="press state-transition rounded-md bg-accent-bg px-3 py-1.5 text-sm font-medium text-accent-fg hover:bg-surface-3">
+              Generate exploits
+            </button>
+          )}
+          {phase === 'review' && (
+            <button type="button" onClick={startScan} className="press state-transition rounded-md px-3 py-1.5 text-sm text-text-secondary hover:bg-surface-2">
               Rescan
             </button>
           )}
@@ -67,17 +92,16 @@ export function PortalApp() {
       {/* ---- body ---- */}
       {!working ? (
         <ConnectScreen pipeline={pipeline} onStart={startScan} />
+      ) : phase === 'exploit' ? (
+        <main className="grid min-h-0 flex-1 grid-cols-1 gap-3 px-3 pb-3 lg:grid-cols-[minmax(0,1.7fr)_minmax(320px,1fr)]">
+          <AgentGraph authors={authorAgents} selectedId={selectedNode} onSelect={setSelectedNode} />
+          <AgentDetail node={selNode} findings={findings} />
+        </main>
       ) : (
         <main className="flex min-h-0 flex-1 flex-col gap-3 px-3 pb-3">
           <ScanStrip agents={agents} mode={mode} />
           <div className="grid min-h-0 flex-1 grid-cols-1 gap-3 lg:grid-cols-[minmax(320px,0.9fr)_minmax(0,1.6fr)]">
-            <FindingsList
-              findings={findings}
-              ranking={ranking}
-              selectedId={selected?.id ?? null}
-              onSelect={setSelected}
-              scanning={phase === 'scanning'}
-            />
+            <FindingsList findings={findings} ranking={ranking} selectedId={selected?.id ?? null} onSelect={setSelected} scanning={phase === 'scanning'} />
             {selected ? (
               <CodeViewer finding={selected} />
             ) : (

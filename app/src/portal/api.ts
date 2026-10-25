@@ -72,6 +72,34 @@ export type ScanEvent =
   | { type: 'ranking'; findings: ScanFinding[]; ranking: RankItem[]; durationMs: number }
   | { type: 'scan_done' };
 
+/** A DeepSeek-authored, validated device command (the exploit payload). */
+export interface AuthoredCommand {
+  action: string; // 'stop_fan' | 'set_rate' | 'resume'
+  rate?: number;
+  reportedOverrides?: { hr?: number; spo2?: number; alarm?: boolean };
+}
+
+export type ExploitEvent =
+  | { type: 'author_started'; agentId: string; findingId: number; target: string; file: string; model: string; ts: number }
+  | { type: 'author_finished'; agentId: string; findingId: number; target: string; durationMs: number; model: string; source: string; command: AuthoredCommand; impact: string; rationale: string }
+  | { type: 'authors_done'; count: number };
+
+function streamSSE<E>(path: string, onEvent: (e: E) => void, onError: () => void): () => void {
+  const es = new EventSource(`${BASE}${path}`);
+  es.onmessage = (m) => {
+    try {
+      onEvent(JSON.parse(m.data) as E);
+    } catch {
+      /* ignore malformed frame */
+    }
+  };
+  es.onerror = () => {
+    es.close();
+    onError();
+  };
+  return () => es.close();
+}
+
 async function getJSON<T>(path: string, timeoutMs = 2500): Promise<T> {
   const ctl = new AbortController();
   const t = setTimeout(() => ctl.abort(), timeoutMs);
@@ -91,20 +119,11 @@ export const api = {
   target: () => getJSON<Target>('/api/target'),
   file: (path: string) => getJSON<CodeFile>(`/api/file?path=${encodeURIComponent(path)}`),
 
-  /** Stream the real scan. Returns a cleanup fn. Calls onEvent per SSE message. */
-  streamScan(onEvent: (e: ScanEvent) => void, onError: () => void): () => void {
-    const es = new EventSource(`${BASE}/api/scan/stream`);
-    es.onmessage = (m) => {
-      try {
-        onEvent(JSON.parse(m.data) as ScanEvent);
-      } catch {
-        /* ignore malformed frame */
-      }
-    };
-    es.onerror = () => {
-      es.close();
-      onError();
-    };
-    return () => es.close();
-  },
+  /** Stream the real scan (one SSE message per agent event). */
+  streamScan: (onEvent: (e: ScanEvent) => void, onError: () => void) =>
+    streamSSE<ScanEvent>('/api/scan/stream', onEvent, onError),
+
+  /** Stream the real DeepSeek exploit-author fan-out (one agent per vuln). */
+  streamExploit: (onEvent: (e: ExploitEvent) => void, onError: () => void) =>
+    streamSSE<ExploitEvent>('/api/exploit/stream', onEvent, onError),
 };

@@ -5,10 +5,10 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from './api';
-import type { Hardware, RankItem, ScanFinding, Target } from './api';
-import { SIM_AGENT_MS, SIM_FINDINGS, SIM_RANKING, SIM_TARGET } from './fixtures';
+import type { AuthoredCommand, Hardware, RankItem, ScanFinding, Target } from './api';
+import { SIM_AGENT_MS, SIM_AUTHORED, SIM_FINDINGS, SIM_RANKING, SIM_TARGET } from './fixtures';
 
-export type Phase = 'connect' | 'ready' | 'scanning' | 'review';
+export type Phase = 'connect' | 'ready' | 'scanning' | 'review' | 'exploit';
 export type Mode = 'connecting' | 'live' | 'sim';
 export type AgentState = 'idle' | 'running' | 'done';
 
@@ -33,6 +33,22 @@ const AGENT_SPEC: Omit<ScanAgent, 'state' | 'startedAt' | 'durationMs' | 'findin
 const freshAgents = (): ScanAgent[] =>
   AGENT_SPEC.map((a) => ({ ...a, state: 'idle', startedAt: null, durationMs: null, findingCount: 0 }));
 
+/** A DeepSeek exploit-author agent — one spawned per exploitable finding. */
+export interface AuthorAgent {
+  id: string;
+  findingId: number;
+  target: string;
+  file: string;
+  model: string;
+  state: AgentState; // 'running' = authoring
+  startedAt: number | null;
+  durationMs: number | null;
+  command: AuthoredCommand | null;
+  rationale: string;
+  impact: string;
+  source: string; // 'bitdeer' | 'featherless' | 'pre_cached_fallback'
+}
+
 const DISCONNECTED: Hardware = { connected: false, board: null, port: null, fqbn: null };
 
 export interface Pipeline {
@@ -44,7 +60,9 @@ export interface Pipeline {
   findings: ScanFinding[];
   ranking: RankItem[];
   scanStartedAt: number | null;
+  authorAgents: AuthorAgent[];
   startScan: () => void;
+  startExploit: () => void;
   reset: () => void;
 }
 
@@ -57,6 +75,7 @@ export function usePipeline(): Pipeline {
   const [findings, setFindings] = useState<ScanFinding[]>([]);
   const [ranking, setRanking] = useState<RankItem[]>([]);
   const [scanStartedAt, setScanStartedAt] = useState<number | null>(null);
+  const [authorAgents, setAuthorAgents] = useState<AuthorAgent[]>([]);
 
   const timers = useRef<ReturnType<typeof setTimeout>[]>([]);
   const closeScan = useRef<(() => void) | null>(null);
@@ -184,19 +203,85 @@ export function usePipeline(): Pipeline {
     else runSim();
   }, [clearTimers, runLive, runSim]);
 
+  // ---- exploit authoring: spawn one DeepSeek agent per exploitable finding ----
+  const patchAuthor = useCallback((findingId: number, partial: Partial<AuthorAgent>) => {
+    setAuthorAgents((prev) => prev.map((a) => (a.findingId === findingId ? { ...a, ...partial } : a)));
+  }, []);
+
+  const buildAuthors = useCallback((): AuthorAgent[] => {
+    const real = ranking.filter((r) => r.real);
+    const src = real.length ? real.map((r) => r.findingId) : findings.filter((f) => f.scanner === 'semgrep').map((f) => f.id);
+    return src.map((findingId) => {
+      const f = findings.find((ff) => ff.id === findingId);
+      const target = f?.target ?? 'device';
+      return {
+        id: `author/${target}`, findingId, target, file: f?.file ?? '',
+        model: 'DeepSeek-V4.1-Flash', state: 'idle' as const, startedAt: null,
+        durationMs: null, command: null, rationale: '', impact: '', source: '',
+      };
+    });
+  }, [ranking, findings]);
+
+  const runAuthorsSim = useCallback((agents: AuthorAgent[]) => {
+    agents.forEach((a, i) => {
+      const dur = 2400 + i * 1100;
+      timers.current.push(setTimeout(() => patchAuthor(a.findingId, { state: 'running', startedAt: Date.now() }), 300 + i * 250));
+      timers.current.push(
+        setTimeout(() => {
+          const sim = SIM_AUTHORED[a.file];
+          patchAuthor(a.findingId, {
+            state: 'done', durationMs: dur,
+            command: sim?.command ?? { action: 'stop_fan' },
+            rationale: sim?.rationale ?? 'Unauthenticated command accepted.',
+            impact: sim?.impact ?? 'Fan stopped.',
+            source: 'pre_cached_fallback', model: 'DeepSeek-V4.1-Flash',
+          });
+        }, 300 + i * 250 + dur),
+      );
+    });
+  }, [patchAuthor]);
+
+  const runAuthorsLive = useCallback(
+    (agents: AuthorAgent[]) => {
+      closeScan.current = api.streamExploit(
+        (e) => {
+          if (e.type === 'author_started') patchAuthor(e.findingId, { state: 'running', startedAt: Date.now(), model: e.model });
+          else if (e.type === 'author_finished')
+            patchAuthor(e.findingId, { state: 'done', durationMs: e.durationMs, command: e.command, rationale: e.rationale, impact: e.impact, source: e.source, model: e.model });
+          else if (e.type === 'authors_done') {
+            closeScan.current?.();
+            closeScan.current = null;
+          }
+        },
+        () => runAuthorsSim(agents),
+      );
+    },
+    [patchAuthor, runAuthorsSim],
+  );
+
+  const startExploit = useCallback(() => {
+    clearTimers();
+    const agents = buildAuthors();
+    setAuthorAgents(agents);
+    setPhase('exploit');
+    if (modeRef.current === 'live') runAuthorsLive(agents);
+    else runAuthorsSim(agents);
+  }, [clearTimers, buildAuthors, runAuthorsLive, runAuthorsSim]);
+
   const reset = useCallback(() => {
     clearTimers();
     setAgents(freshAgents());
     setFindings([]);
     setRanking([]);
     setScanStartedAt(null);
+    setAuthorAgents([]);
     setPhase(hardware.connected ? 'ready' : 'connect');
   }, [clearTimers, hardware.connected]);
 
   useEffect(() => () => clearTimers(), [clearTimers]);
 
   return useMemo(
-    () => ({ mode, phase, hardware, target, agents, findings, ranking, scanStartedAt, startScan, reset }),
-    [mode, phase, hardware, target, agents, findings, ranking, scanStartedAt, startScan, reset],
+    () => ({ mode, phase, hardware, target, agents, findings, ranking, scanStartedAt, authorAgents, startScan, startExploit, reset }),
+    [mode, phase, hardware, target, agents, findings, ranking, scanStartedAt, authorAgents, startScan, startExploit, reset],
   );
 }

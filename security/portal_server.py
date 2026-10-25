@@ -18,6 +18,8 @@ Endpoints:
     GET /api/hardware      -> plugged-in Arduino (via `arduino-cli board list`)
     GET /api/target        -> the codebase under scan + the two planted vulns
     GET /api/scan/stream   -> SSE: 4 scanner agents, honest timing, then ranking
+    GET /api/exploit/stream-> SSE: one DeepSeek exploit-author agent per
+                              exploitable finding, honest timing, then done
     GET /api/file?path=... -> a repo source file (path-escape guarded)
 """
 
@@ -51,7 +53,20 @@ from scan.run_scanners import (  # noqa: E402
     run_semgrep,
 )
 
+# The REAL exploit-author stage, imported by package path exactly as loop.py
+# does it (security/ is on sys.path above). generate_dynamic_payload has the
+# DeepSeek model AUTHOR a validated executable DeviceCommand from the finding;
+# it never raises (falls back to a deterministic validated command).
+from generate.exploit import (  # noqa: E402
+    DEEPSEEK_MODEL,
+    generate_dynamic_payload,
+)
+
 app = Flask(__name__)
+
+# Where the exploit-author reads the device's live attack surface (it falls back
+# to a static surface if the device-service isn't up, so this works either way).
+DEVICE_SERVICE_URL = os.environ.get("DEVICE_SERVICE_URL", "http://127.0.0.1:8071")
 
 # The Vite dev server lives on a different origin, so every response needs
 # permissive CORS. Done by hand (no flask-cors dependency).
@@ -318,6 +333,33 @@ def rank_findings(findings: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return ranking
 
 
+# The most recent scan result, so the exploit endpoint can pick up the ranking
+# the scan stream already computed instead of re-running the fleet. Populated by
+# _scan_stream() when it reaches the ranking, and by _compute_scan() on a cold
+# start (exploit hit before any scan).
+_LAST_SCAN: dict[str, Any] = {"findings": [], "ranking": []}
+
+
+def _compute_scan() -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Run the full scanner fleet once (non-streaming) and return
+    (findings, ranking). Uses the exact same fleet + run_semgrep/run_bandit +
+    rank_findings the SSE scan endpoint uses; the exploit endpoint calls this
+    when it is hit before any scan has populated _LAST_SCAN."""
+    all_findings: list[dict[str, Any]] = []
+    gid = 0
+    for tool, target_name, _language, target_dir, rules_dir in _SCAN_FLEET:
+        if tool == "semgrep" and rules_dir:
+            found = run_semgrep(target_dir, rules_dir)
+        else:
+            found = run_bandit(target_dir)
+        for f in found:
+            gid += 1
+            f["id"] = gid
+            f["target"] = target_name
+        all_findings.extend(found)
+    return all_findings, rank_findings(all_findings)
+
+
 def _sse(obj: dict[str, Any]) -> str:
     """Encode one SSE `data:` message (double newline terminates the event)."""
     return f"data: {json.dumps(obj)}\n\n"
@@ -372,11 +414,16 @@ def _scan_stream():
         )
 
     total_ms = int(round((time.perf_counter() - total_t0) * 1000))
+    ranking = rank_findings(all_findings)
+    # Stash the result so /api/exploit/stream reuses this ranking rather than
+    # re-running the fleet.
+    _LAST_SCAN["findings"] = all_findings
+    _LAST_SCAN["ranking"] = ranking
     yield _sse(
         {
             "type": "ranking",
             "findings": all_findings,
-            "ranking": rank_findings(all_findings),
+            "ranking": ranking,
             "durationMs": total_ms,
         }
     )
@@ -387,6 +434,105 @@ def _scan_stream():
 def scan_stream():
     resp = Response(_scan_stream(), mimetype="text/event-stream")
     # Keep proxies/dev-servers from buffering the stream so each agent beat
+    # reaches the UI as it happens.
+    resp.headers["Cache-Control"] = "no-cache"
+    resp.headers["X-Accel-Buffering"] = "no"
+    return resp
+
+
+# ----------------------------------------------------------- exploit/SSE ----
+
+# The attacker goal handed to the author agent, chosen by the finding's file:
+# the server HTTP command handler vs its firmware serial analog.
+_GOAL_SERVER = (
+    "Stop the ventilator fan while keeping the dashboard reporting healthy "
+    "vitals and no alarm."
+)
+_GOAL_FIRMWARE = (
+    "Forge a serial STATE frame that stops the fan and falsifies the displayed "
+    "vitals."
+)
+
+
+def _goal_for(file: str) -> str:
+    """Pick the attacker goal by the finding's file (firmware vs server)."""
+    if file.endswith("uno_actuator.ino"):
+        return _GOAL_FIRMWARE
+    return _GOAL_SERVER
+
+
+def _exploitable_findings() -> list[dict[str, Any]]:
+    """The exploitable findings — the ranking entries flagged real==True (the
+    two CWE-306) — joined back to their full finding dicts, in rank order. On a
+    cold cache (exploit hit before any scan) it runs the fleet to populate it."""
+    if not _LAST_SCAN["findings"] or not _LAST_SCAN["ranking"]:
+        findings, ranking = _compute_scan()
+        _LAST_SCAN["findings"] = findings
+        _LAST_SCAN["ranking"] = ranking
+
+    by_id = {f.get("id"): f for f in _LAST_SCAN["findings"]}
+    exploitable: list[dict[str, Any]] = []
+    for entry in _LAST_SCAN["ranking"]:  # already in rank order
+        if entry.get("real"):
+            finding = by_id.get(entry.get("findingId"))
+            if finding is not None:
+                exploitable.append(finding)
+    return exploitable
+
+
+def _exploit_stream():
+    """Spawn one DeepSeek exploit-author agent per exploitable finding, in rank
+    order, emitting an author_started / author_finished SSE pair per agent with
+    HONEST per-author wall-clock timing, then a final authors_done. Each agent
+    has the model AUTHOR a validated, executable DeviceCommand for a goal picked
+    by the finding's file. generate_dynamic_payload never raises — a missing or
+    declining model falls back to a deterministic validated command (its
+    `source` becomes 'pre_cached_fallback')."""
+    findings = _exploitable_findings()
+    for finding in findings:
+        file = finding.get("file", "")
+        target = finding.get("target", "")
+        goal = _goal_for(file)
+        agent_id = f"author/{target}"
+
+        yield _sse(
+            {
+                "type": "author_started",
+                "agentId": agent_id,
+                "findingId": finding.get("id"),
+                "target": target,
+                "file": file,
+                "model": DEEPSEEK_MODEL,
+                "ts": _now_ms(),
+            }
+        )
+
+        t0 = time.perf_counter()
+        result = generate_dynamic_payload(goal, finding, base_url=DEVICE_SERVICE_URL)
+        duration_ms = int(round((time.perf_counter() - t0) * 1000))
+
+        yield _sse(
+            {
+                "type": "author_finished",
+                "agentId": agent_id,
+                "findingId": finding.get("id"),
+                "target": target,
+                "durationMs": duration_ms,
+                "model": result.get("modelId"),
+                "source": result.get("source"),
+                "command": result.get("command"),
+                "impact": result.get("impact"),
+                "rationale": result.get("rationale"),
+            }
+        )
+
+    yield _sse({"type": "authors_done", "count": len(findings)})
+
+
+@app.get("/api/exploit/stream")
+def exploit_stream():
+    resp = Response(_exploit_stream(), mimetype="text/event-stream")
+    # Same anti-buffering headers as the scan stream, so each author beat
     # reaches the UI as it happens.
     resp.headers["Cache-Control"] = "no-cache"
     resp.headers["X-Accel-Buffering"] = "no"

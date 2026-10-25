@@ -232,6 +232,15 @@ body {
   animation: beaconPing 1.9s var(--ease-out) infinite;
 }
 
+/* Agent-graph edges: dim when idle, glowing teal + gently pulsing when active. */
+.graph-edge { stroke: var(--color-wire); }
+.graph-edge-active {
+  stroke: var(--color-wire-active);
+  filter: drop-shadow(0 0 3px var(--color-wire-active));
+  animation: edgePulse 1.9s var(--ease-state) infinite;
+}
+@keyframes edgePulse { 0%, 100% { opacity: 0.55; } 50% { opacity: 1; } }
+
 /* Node glow helpers (the ONE place glow is allowed — live agents). */
 .glow-teal  { box-shadow: var(--glow-teal); }
 .glow-green { box-shadow: var(--glow-green); }
@@ -284,6 +293,7 @@ body {
   .gem--live { animation: none; }
   .animate-enter { animation: none; }
   .beacon-core, .beacon-ping { animation: none; }
+  .graph-edge-active { animation: none; }
 }
 
 /* ---------- react-diff-view: de-animated, two-color, only inside a disclosure ---------- */

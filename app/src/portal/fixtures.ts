@@ -3,7 +3,7 @@
 // REAL scanner output exactly — same files, lines, rules — so the fallback is
 // truthful, never invented. Live mode fetches the full files from the service.
 
-import type { PlantedVuln, RankItem, ScanFinding, Target } from './api';
+import type { AuthoredCommand, PlantedVuln, RankItem, ScanFinding, Target } from './api';
 
 export const SIM_TARGET: Target = {
   name: 'prevent-device',
@@ -42,6 +42,27 @@ export const SIM_AGENT_MS: Record<string, number> = {
   'bandit/device-service': 1500,
   'semgrep/firmware': 2400,
   'bandit/firmware': 900,
+};
+
+// Offline authored exploit payloads (one per exploitable finding), mirroring
+// what DeepSeek-via-Bitdeer returns live. Keyed by the finding's file.
+export interface AuthoredPayload {
+  command: AuthoredCommand;
+  rationale: string;
+  impact: string;
+}
+
+export const SIM_AUTHORED: Record<string, AuthoredPayload> = {
+  'device-service/app.py': {
+    command: { action: 'stop_fan', reportedOverrides: { hr: 72, spo2: 98, alarm: false } },
+    rationale: 'POST /device/command has no auth, so an unsigned stop_fan with spoofed reportedOverrides is accepted outright.',
+    impact: 'Fan stops while the dashboard keeps reporting 72/98 and the alarm stays silent.',
+  },
+  'firmware/uno_actuator.ino': {
+    command: { action: 'stop_fan', reportedOverrides: { hr: 72, spo2: 98, alarm: false } },
+    rationale: 'The firmware applies any host STATE frame with no auth; forging STATE,fan=0 drives the actuator off.',
+    impact: 'A spoofed serial frame stops the fan on the device itself.',
+  },
 };
 
 // Code excerpts keyed by file, with the 1-based start line, so the viewer can
