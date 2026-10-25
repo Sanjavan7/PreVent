@@ -61,6 +61,10 @@ export function useRealtimeMock(): RealtimeState {
   const timersRef = useRef<ReturnType<typeof setTimeout>[]>([]);
   // The gate's continuation while the run holds at waiting_for_human (else null).
   const approveRef = useRef<(() => void) | null>(null);
+  // Cross-tab sync channel (mock rehearsal): lets one Simulate/Approve click
+  // drive every open tab, mirroring how the LIVE shared SpacetimeDB row keeps
+  // both demo laptops in lockstep. Null where BroadcastChannel is unavailable.
+  const channelRef = useRef<BroadcastChannel | null>(null);
   // Monotonic id counters for the additive collections.
   const seqRef = useRef(0);
 
@@ -129,7 +133,15 @@ export function useRealtimeMock(): RealtimeState {
     [nextId],
   );
 
-  const approve = useCallback(() => approveRef.current?.(), []);
+  const approve = useCallback(() => {
+    approveRef.current?.();
+    // Mirror the approval to any other open tab so both laptops advance together.
+    try {
+      channelRef.current?.postMessage({ type: 'approve' });
+    } catch {
+      /* no BroadcastChannel in this environment */
+    }
+  }, []);
 
   // Register the approve bridge while this hook instance is mounted.
   useEffect(() => {
@@ -138,6 +150,34 @@ export function useRealtimeMock(): RealtimeState {
       if (activeApprove === approve) activeApprove = null;
     };
   }, [approve]);
+
+  // Cross-tab sync (mock rehearsal only): one Simulate/Approve click in any tab
+  // drives all of them, so the two-laptop demo can be rehearsed on one machine
+  // without the live SpacetimeDB row. Received messages apply the raw state
+  // setters directly (never re-broadcast), so there is no echo loop. No-op in
+  // environments without BroadcastChannel (older browsers, some webviews).
+  useEffect(() => {
+    let ch: BroadcastChannel | null = null;
+    try {
+      ch = new BroadcastChannel('prevent-mock-sync');
+      ch.onmessage = (e: MessageEvent) => {
+        const m = e.data as { type?: string; value?: boolean } | null;
+        if (m?.type === 'exploit') setMockExploitedState(!!m.value);
+        else if (m?.type === 'approve') approveRef.current?.();
+      };
+      channelRef.current = ch;
+    } catch {
+      channelRef.current = null;
+    }
+    return () => {
+      channelRef.current = null;
+      try {
+        ch?.close();
+      } catch {
+        /* ignore */
+      }
+    };
+  }, []);
 
   // ---- the scripted timeline -------------------------------------------------
 
@@ -420,10 +460,15 @@ export function useRealtimeMock(): RealtimeState {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mockExploited]);
 
-  const setMockExploited = useCallback(
-    (v: boolean) => setMockExploitedState(v),
-    [],
-  );
+  const setMockExploited = useCallback((v: boolean) => {
+    setMockExploitedState(v);
+    // Broadcast so every other open tab flips at the same instant.
+    try {
+      channelRef.current?.postMessage({ type: 'exploit', value: v });
+    } catch {
+      /* no BroadcastChannel in this environment */
+    }
+  }, []);
 
   return useMemo<RealtimeState>(
     () => ({
