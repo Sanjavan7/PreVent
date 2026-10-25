@@ -4,8 +4,10 @@
 // returned. No millisecond fakery: this reflects what the scanners actually took.
 
 import { useEffect, useState } from 'react';
+import { motion, useReducedMotion } from 'motion/react';
 import type { ScanAgent } from '../usePipeline';
 import { nodeStyle } from '../flow/nodeStyles';
+import { staggerParent, revealChild, revealReduced } from '../../lib/motion';
 
 function fmt(ms: number): string {
   return ms < 950 ? `${Math.round(ms)}ms` : `${(ms / 1000).toFixed(1)}s`;
@@ -30,7 +32,11 @@ function AgentCard({ agent }: { agent: ScanAgent }) {
   const vstate = stateOf(agent);
   const s = nodeStyle(vstate);
   return (
-    <div className={`state-transition flex-1 rounded-lg px-3 py-2.5 ${agent.state === 'idle' ? 'panel' : 'panel panel--raised'}`}>
+    <div
+      className={`state-transition flex-1 rounded-[var(--radius-lg)] border border-glass-border bg-glass-bg px-3.5 py-3 backdrop-blur-[14px] [box-shadow:var(--shadow-md)] ${
+        vstate === 'active' ? 'glow-teal' : vstate === 'alert' ? 'glow-red' : vstate === 'done' ? 'ring-1 ring-success/30' : ''
+      }`}
+    >
       <div className="flex items-center justify-between gap-2">
         <div className={`flex items-center gap-1.5 ${s.gem}`}>
           <span className={`gem ${s.live ? 'gem--live' : ''}`} style={{ width: 7, height: 7 }} />
@@ -63,22 +69,32 @@ function AgentCard({ agent }: { agent: ScanAgent }) {
 }
 
 export function ScanStrip({ agents, mode }: { agents: ScanAgent[]; mode: 'live' | 'sim' | 'connecting' }) {
+  const reduce = !!useReducedMotion();
+  const child = reduce ? revealReduced : revealChild;
   const done = agents.filter((a) => a.state === 'done').length;
   return (
     <section>
-      <div className="mb-2 flex items-center justify-between px-1">
-        <span className="text-sm font-medium text-text-secondary">
-          Scanner fleet <span className="text-text-muted">· {done}/{agents.length} complete</span>
+      <div className="mb-2.5 flex items-center justify-between px-1">
+        <span className="flex items-baseline gap-2">
+          <span className="font-display text-lg font-normal text-text">Scanner fleet</span>
+          <span className="text-meta text-text-muted">{done}/{agents.length} complete</span>
         </span>
-        <span className="font-mono text-meta text-text-muted">
+        <span className="rounded-pill bg-surface-2 px-2.5 py-1 font-mono text-meta text-text-muted">
           {mode === 'live' ? 'live scan' : 'simulated scan'}
         </span>
       </div>
-      <div className="flex flex-col gap-2 sm:flex-row">
+      <motion.div
+        className="flex flex-col gap-2.5 sm:flex-row"
+        variants={staggerParent}
+        initial="hidden"
+        animate="show"
+      >
         {agents.map((a) => (
-          <AgentCard key={a.id} agent={a} />
+          <motion.div key={a.id} variants={child} className="flex-1">
+            <AgentCard agent={a} />
+          </motion.div>
         ))}
-      </div>
+      </motion.div>
     </section>
   );
 }

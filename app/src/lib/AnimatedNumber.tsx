@@ -53,7 +53,7 @@ export function AnimatedNumber({
 
   return (
     <motion.span
-      style={{ display: 'inline-block', color: 'var(--color-danger)', textShadow: '0 0 18px rgba(255,77,79,0.33)' }}
+      style={{ display: 'inline-block', color: 'var(--color-danger)', textShadow: '0 0 18px color-mix(in oklab, var(--color-danger) 33%, transparent)' }}
       animate={reduce ? undefined : { x: [0, -2, 2, -1, 1, 0] }}
       transition={{ duration: 0.35, ease: EASE_OUT, repeat: Infinity, repeatDelay: 0.9 }}
     >
