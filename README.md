@@ -1,46 +1,79 @@
-# PreVent — Autonomous Medical-Device Security Pipeline
+<div align="center">
 
-**Cal Hacks 13.0.** A pipeline of AI agents that finds a security vulnerability in a medical device's software, **proves it by exploiting it in a sandbox**, writes and **verifies** a fix, and restores the device — every step visible, with a human approving before anything is final. Demonstrated live on a harmless Arduino-driven "ventilator" + patient prop, on a split screen where the judge is the patient.
+<img src="brand/prevent-mark.svg" alt="PreVent logo" width="82" height="82" />
 
-> **Honest framing (we hold this throughout).** This is a **pre-market / staging** tool — it never auto-patches live clinical devices. The hardware is a **desk fan that models a missing-authentication vulnerability class** (CWE-306), not a real ventilator. We model the *class* of the real advisory **CVE-2019-6538** (Medtronic Conexus), which is adjacent-radio, not a remote hack. Prevalence figures are industry **estimates**; there is **no confirmed patient death from a device hack** (documented deaths come from ransomware disrupting care). The enabling regulation is **FDA section 524B**.
+# PreVent
+
+**PreVent is autonomous security for the medical devices a hospital cannot patch fast enough.**
+
+The vulnerability is usually known and the fix usually exists, but nobody ships it in time, so a device can be compromised and told to stop while it keeps reporting that the patient is fine. PreVent finds the vulnerability, proves it by exploiting real hardware, patches the code behind a human gate, and re-runs the exact attack to prove it is closed. The verdict is a byte comparison on the wire, 200 to 401, with no model in it, and the whole loop runs ten times in under ninety seconds.
+
+`Claude` · `Factory Droid` · `SpacetimeDB` · `Fetch.ai ASI:One` · `Bitdeer / DeepSeek` · `Arduino` · `three.js` · `React`
+
+[Demo video](https://youtu.be/Aq5WXmQQooo) · Live ASI:One agent `PreVent-Security` · Built in 36 hours at Cal Hacks 13.0
+
+</div>
+
+![PreVent 3D hospital ward going from stable and breathing to compromised and flatlining, then back to healthy after the patch.](devpost/media/ward.gif)
+
+> 53% of connected hospital devices carry a known critical vulnerability (Cynerio, 2022). The attack class is usually public, and so is the fix. PreVent closes the gap between the two, on real hardware, with a human in the loop.
 
 ## The loop
-`GROUND` a real CVE → `SCAN` the device code (SemGrep + Bandit; Claude reasons which finding is real) → `GENERATE` an exploit (Bitdeer open model) → `DELIVER` it (a judge presses an IR remote; the device obeys an **unauthenticated** command — the fan stops while the device keeps reporting normal vitals and never alarms, i.e. it **lies**) → `PATCH` (Factory Droid writes the fix) → **HUMAN GATE** → `VERIFY` (re-run the exact exploit; it now returns 401) → `RESTORE`.
 
-One shared `device_status` row drives **the physical hardware, the left patient sim, and the right "no black box" dashboard** — nothing can drift or be faked.
+Point PreVent at a device's code and plug in the device. One run, ten times in under ninety seconds:
 
-## How each sponsor tech is used
-- **Claude (Anthropic) — Agent SDK:** the reasoning core. Scan triage, outcome judging, verification triage, with **visible streamed reasoning, stated uncertainty, and a real safety refusal** on the dashboard.
-- **Factory Droid (`@factory/droid-sdk`):** the autonomous **patch engineer** — triggered by the orchestrator (not a human) on the confirmed vuln, it edits the device-service repo and streams its **plan + real diff** to the dashboard, scoped so it cannot commit/push/deploy, gated by a human click.
-- **SpacetimeDB:** the real-time backbone — one reactive DB (tables + reducers + subscriptions) that the device service, both panels, and the serial bridge subscribe to; separation of duties is enforced in reducers via `ctx.sender`. (a `RealtimeBackend` abstraction leaves room for a **Convex** fallback, but that adapter is dormant and unbuilt — see "Convex fallback" below.)
-- **Bitdeer AI Model Studio:** hosts the open model (`deepseek-ai/DeepSeek-V4.1-Flash`) that writes the proof-of-concept exploit — isolating the offensive-code model from the trust/decision model (a real separation of duties).
-- **NVD/CVE:** grounds the vulnerability in a real published advisory.
+1. **Find.** SemGrep and Bandit scan the code; Claude picks the one real missing-auth flaw (CWE-306) out of the decoys.
+2. **Prove.** A DeepSeek model on Bitdeer writes a live exploit. The fan stops while the monitor still reads healthy. The device lies to the doctor.
+3. **Patch.** A writer Droid edits the real code, a read-only reviewer Droid audits the diff, and a human approves.
+4. **Verify.** We replay the exact exploit bytes and assert the response flips from 200 to 401. No model votes on the result.
+5. **Sync.** One SpacetimeDB row keeps the dashboard, the 3D ward, and the fan in step, and the run leaves an auditable receipt.
 
-## What's real vs simulated
-- **Real:** the agent pipeline (find → exploit → patch → verify), the Factory Droid diff, the SemGrep finding, the deterministic verifier, the Arduino actuation driven by live state, the judge-chosen IR payload.
-- **Simulated / visualized:** the hospital "fleet of ~3,412 devices" (a scale visualization — only one real device is in the loop) and the patient (the judge).
+![The agent flow in the Command Center: Claude triages, DeepSeek writes the exploit, the device is breached, then a writer Droid and a read-only reviewer Droid patch it and the exploit is re-fired.](devpost/media/agents.gif)
 
-## Repo layout
-| Dir | Owner | What |
-|---|---|---|
-| `contracts/` | shared | Frozen types, serial-schema constant, model IDs, mock fixtures — **import, don't redefine** |
-| `agents/` | Dev 1 | Orchestrator, Agent SDK runner, human gate, Factory Droid patch stage |
-| `device-service/` · `security/` | Dev 2 | Vulnerable+patched service, SemGrep/Bandit, Bitdeer exploit, verifier, NVD |
-| `realtime/` · `app/` | Dev 3 | SpacetimeDB module + abstraction, dashboard, 2D sim |
-| `firmware/` · `serial-bridge/` · `emulator/` | Hardware | UNO firmware, serial bridge, software emulator |
+## Architecture
 
-Per-person task plans are in **`plans/`** (`PLAN-FOUNDATION.md`, `PLAN-DEV1…`, `PLAN-DEV2…`, `PLAN-DEV3…`, `PLAN-HW-arduino.md`).
+![PreVent architecture: a Fetch.ai agent runs Claude, DeepSeek and two Factory Droids to find, prove, patch and verify a flaw, a human approves, and one SpacetimeDB row keeps the dashboard, the 3D ward and the Arduino in sync.](devpost/architecture.png)
 
-## Setup
+## How each tool is used
+
+| Tool | What it does here |
+|------|-------------------|
+| **Claude** (Anthropic Agent SDK) | The judgment layer. Triages the real CWE-306 flaw out of scanner decoys, with its reasoning streamed on screen. |
+| **Factory Droid** | A writer Droid patches the code behind a deny-by-default Droid Shield (no git, push or deploy); a read-only reviewer Droid returns a typed verdict. |
+| **SpacetimeDB** | One `device_status` row syncs the dashboard, the 3D ward and the Arduino. The approve reducer checks caller identity, so no agent can approve its own patch. |
+| **Fetch.ai / ASI:One** | The whole find, prove, patch, verify loop runs inside one chat as the `PreVent-Security` agent on Agentverse. |
+| **Bitdeer / DeepSeek** | Writes the exploit, kept separate from the model that approves the fix. |
+| **Arduino** | A real fan, a stand-in for a ventilator, actuated by a live database row. |
+
+Also submitted to the CalHacks Most Technically Complex, Most Creative, Best Hardware and People-First tracks, plus Microsoft, Armadin, MLH Commit, and Mana.
+
+The build was planned and sketched in Mana: the [build playbook](https://mana.space/a/prevent-playbook), the [task lists](https://www.mana.space/a/tasks-lists), and two build chats ([one](https://www.mana.space/shared-chats/2ctWRQSA7PaZ0uzxGkCeH54dcA12/0017928821125503c8a1fe8c2174717a5bc), [two](https://www.mana.space/shared-chats/4UxUphm7FwfqhqUtBTlKuYQe1n52/0017928308809507ff33763d3ae4d60a319)).
+
+## The hardware
+
+The fan is a stand-in for a ventilator: when it spins the patient is breathing, when it stops they are not. The printed mask is the patient side of the circuit.
+
+![PreVent hardware: an Arduino driving a fan through an L293D motor driver, with a pressure sensor, an LCD reading live vitals, status LEDs and a buzzer.](devpost/hardware-devpost.png)
+
+## What is real, and what is not
+
+Real: the pipeline, the Factory Droid diff and the read-only reviewer (live against Factory, with a labeled cached replay as a fallback), the scanner finding and Claude's triage, the 200 to 401 verifier, and the Arduino driven by live state. Simulated: the ward's fleet of 3,412 devices (one real device is in the loop) and the patient.
+
+PreVent is a pre-market, staging tool with a mandatory human sign-off. It never patches live clinical devices. The hardware is a desk fan modelling the missing-auth class, not a real ventilator. We model the class of real advisories like CVE-2019-6538, an adjacent-radio flaw rated 9.3. The receipt follows the shape of FDA 524B, it is not an FDA clearance.
+
+<details>
+<summary><b>Setup and development</b></summary>
+
+<br/>
+
 ```bash
-# prerequisites: Node >=22.12, pnpm, Python 3.11-3.13 (for device-service/security), Arduino IDE 2.x
-cp .env.example .env            # fill in keys (all OPTIONAL for the security loop — see below)
+# Node >=22.12, pnpm, Python 3.11-3.13, Arduino IDE 2.x
+cp .env.example .env            # all keys optional for the security loop
 pnpm install
 pnpm -r typecheck
 ```
 
-## Realtime: connect to the shared Maincloud instance (no CLI needed)
-The `prevent` module is already published to SpacetimeDB Maincloud. Teammates do **not** need the `spacetime` CLI during development — just set three lines in `.env` and `pnpm dev`:
+Realtime, against the shared Maincloud instance (no CLI needed):
 
 ```
 VITE_REALTIME_BACKEND=spacetimedb
@@ -48,56 +81,25 @@ VITE_SPACETIMEDB_URI=wss://maincloud.spacetimedb.com
 VITE_SPACETIMEDB_MODULE=prevent
 ```
 
-- **Dashboard** (watch live state): https://spacetimedb.com/prevent
-- **Everyone writes to the same `device_status` row** — that's expected (it's the demo).
-- **Owner (Dev 3) only:** when the module schema changes, republish with `spacetime publish --module-path realtime/spacetimedb --server maincloud prevent`, regenerate bindings (`spacetime generate --lang typescript --module-path realtime/spacetimedb --out-dir realtime/src/module_bindings`), commit the bindings and push. Everyone else just `git pull` + `pnpm install`.
+Security loop, headless and offline, no API keys:
 
-### Local fallback (optional, if Maincloud flakes)
-Needs the `spacetime` CLI (macOS: `curl -sSf https://install.spacetimedb.com | sh`, then `spacetime install 2.13.0; spacetime version use 2.13.0`).
-```bash
-spacetime start                                                          # background: local server on :3000
-spacetime publish --module-path realtime/spacetimedb --server local prevent
-# flip .env: VITE_SPACETIMEDB_URI=ws://localhost:3000
-```
-
-### SpacetimeDB credit
-Redeem code `CALHACKS13` at https://spacetimedb.com/redeem for 100k TeV (a month of Pro).
-
-## Convex fallback — DORMANT, not a one-line flip
-This was scoped as a warm fallback but is **not built**, so it is **not** a drop-in swap today. Setting `VITE_REALTIME_BACKEND=convex` makes the app **fail loud on boot** (`main.tsx` refuses any backend other than `spacetimedb` or `mock`, rather than silently rendering a fake-live dashboard off the mock hook).
-- **What exists:** the client adapter in `realtime/src/backend/convex.ts`, a provisioned dev deployment, and the env placeholders below.
-- **What's missing:** the Convex server functions in `realtime/convex/` are **NOT written** (schema + per-table queries + per-reducer mutations with `ctx.auth.getUserIdentity()`). Building them is a real task, not a config flip, and only worth doing if we actually need the fallback (it forfeits the SpacetimeDB prize).
-```
-# These are placeholders for IF the Convex functions get built — the app will
-# NOT boot with convex until then.
-VITE_REALTIME_BACKEND=convex
-VITE_CONVEX_URL=https://spotted-kudu-58.convex.cloud
-```
-- **Dashboard:** https://dashboard.convex.dev/t/sanjavan/prevent-dc2b7
-- **Project:** `sanjavan:prevent-dc2b7`, dev deployment `spotted-kudu-58` (US East)
-- No CLI needed by teammates. Owner (Dev 3) runs `npx convex login`, `npx convex deployment create ... --select` for provisioning; teammates just pull.
-
-### Security loop (Dev 2) — runs headless, offline, with no API keys
 ```bash
 python3.13 -m venv .venv
 ./.venv/bin/python -m pip install -r security/requirements.txt -r security/requirements-dev.txt
-uv tool install --python 3.13 semgrep==1.182.1    # SemGrep + Bandit are standalone tools
+uv tool install --python 3.13 semgrep==1.182.1
 uv tool install --python 3.13 bandit==1.9.4
-
-./.venv/bin/python security/loop.py               # GROUND→SCAN→GENERATE→DELIVER→PATCH→VERIFY→RESTORE
-./.venv/bin/python -m pytest security/tests        # 24 tests (~16s)
+./.venv/bin/python security/loop.py
+./.venv/bin/python -m pytest security/tests
 ```
-The device-service listens on **port 8071** (not 5000 — on macOS, AirPlay owns
-:5000 and answers 403, which would fake a VERIFY pass). Full guide:
-[`security/README.md`](security/README.md); design rationale + integration
-seams: [`docs/DEV2-SECURITY-DECISIONS.md`](docs/DEV2-SECURITY-DECISIONS.md).
 
-**Keys are optional.** The loop uses a cached PoC and deterministic triage when
-unset. Set `FEATHERLESS_API_KEY` for live PoC generation (primary provider;
-`BITDEER_API_KEY` is the fallback — both serve `DeepSeek-V4.1-Flash-1017`),
-`ANTHROPIC_API_KEY` for live Claude triage narration (via Dev 1), `NVD_API_KEY`
-for a higher NVD rate limit (the CVE JSON is already cached). `FACTORY_API_KEY`
-is used by Dev 1's Droid patch stage, not the Dev 2 loop.
+Keys are optional. Set `BITDEER_API_KEY` or `FEATHERLESS_API_KEY` for live exploit generation, `ANTHROPIC_API_KEY` for live Claude triage, `FACTORY_API_KEY` for the live Droid patch stage. Full guides: [`security/README.md`](security/README.md), [`fetch_agent/README.md`](fetch_agent/README.md).
 
-## Team workflow
-Shared `main` is the integration branch. Each dev works on a branch (`dev1/…`, `dev2/…`, `dev3/…`, `hw/…`) and opens a PR into `main`. **All code is written during the event.**
+</details>
+
+---
+
+<div align="center">
+
+Built in 36 hours at Cal Hacks 13.0 by Israel Ogwu, Christian Ibarbia Ruiz, Saketh Poori and Sanjavan Ghodasara.
+
+</div>
