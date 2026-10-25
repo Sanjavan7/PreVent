@@ -12,10 +12,12 @@ export function ApprovalGate({
   show,
   approved,
   onApprove,
+  onReject,
 }: {
   show: boolean;
   approved: boolean;
   onApprove: () => void;
+  onReject?: () => void;
 }) {
   if (!show) return null;
 
@@ -27,14 +29,25 @@ export function ApprovalGate({
           <span>Deploying&hellip;</span>
         </div>
       ) : (
-        <button
-          type="button"
-          onClick={onApprove}
-          className="state-transition w-full rounded-sm px-4 py-2 text-sm font-medium text-white hover:brightness-110"
-          style={{ background: '#006FCE' }}
-        >
-          Approve &amp; deploy
-        </button>
+        <div className="space-y-2">
+          <button
+            type="button"
+            onClick={onApprove}
+            className="state-transition w-full rounded-sm px-4 py-2 text-sm font-medium text-white hover:brightness-110"
+            style={{ background: '#006FCE' }}
+          >
+            Approve &amp; deploy
+          </button>
+          {onReject && (
+            <button
+              type="button"
+              onClick={onReject}
+              className="state-transition w-full rounded-sm border border-border px-4 py-2 text-sm text-text-secondary hover:bg-surface-2"
+            >
+              Reject
+            </button>
+          )}
+        </div>
       )}
     </div>
   );

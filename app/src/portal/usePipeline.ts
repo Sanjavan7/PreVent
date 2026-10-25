@@ -7,7 +7,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from './api';
-import type { AuthoredCommand, DeliverResult, FlashResult, Hardware, RankItem, ScanFinding, Target } from './api';
+import type { AuthoredCommand, DeliverResult, FlashResult, Hardware, PatchReview, RankItem, ScanFinding, Target, VerifyResult } from './api';
 import { SIM_AGENT_MS, SIM_AUTHORED, SIM_FINDINGS, SIM_RANKING, SIM_TARGET } from './fixtures';
 
 export type Phase = 'connect' | 'ready' | 'scanning' | 'review' | 'exploit';
@@ -54,7 +54,38 @@ export interface AuthorAgent {
   prompt: { system: string; user: string } | null;
 }
 
-/** The attack runs as two sequential, visible stages. */
+/** A single command the Droid Shield denied while the writer ran. */
+export interface ShieldBlock {
+  command: string;
+  reason: string;
+  ts: number;
+}
+
+/** The Factory Droid writer agent — streams its reasoning + the patch diff. */
+export interface WriterAgent {
+  state: AgentState;
+  model: string;
+  usedFallback: boolean;
+  transcript: string; // text channel
+  thinking: string; // thinking channel
+  diff: string;
+  diffEmpty: boolean;
+  shieldBlocks: ShieldBlock[];
+  credits: { factoryCredits?: number; inputTokens: number; outputTokens: number; thinkingTokens: number } | null;
+  durationMs: number | null;
+}
+
+/** The read-only reviewer agent — audits the diff, emits a typed verdict. */
+export interface ReviewAgent {
+  state: AgentState;
+  model: string;
+  transcript: string;
+  verdict: PatchReview | null;
+  structured: boolean;
+}
+
+/** The attack runs as two sequential, visible stages, then the remediation
+ *  (patch → review → human gate → verify) extends the same exploit timeline. */
 export type ExploitStage =
   | 'idle'
   | 'curating_server'
@@ -64,7 +95,15 @@ export type ExploitStage =
   | 'curating_fan'
   | 'fan_ready'
   | 'flashing_fan'
-  | 'fan_breached';
+  | 'fan_breached'
+  | 'patching'
+  | 'reviewing'
+  | 'awaiting_approval'
+  | 'applying'
+  | 'verifying'
+  | 'verified'
+  | 'patch_failed'
+  | 'patch_rejected';
 
 const DISCONNECTED: Hardware = { connected: false, board: null, port: null, fqbn: null };
 
@@ -77,6 +116,64 @@ const SIM_DELIVER = (): DeliverResult => ({
 const SIM_FLASH = (): FlashResult => ({
   ok: true, durationMs: 4800, port: '/dev/cu.usbmodem',
   log: 'avrdude: 5234 bytes of flash written\navrdude: verifying flash memory against prevent_fanoff.ino.hex\navrdude: verified', error: null,
+});
+
+// ---- offline fallback for the patch / review cell (same story, replayed) ----
+// A genuine guard diff (already stripped of git headers, like the runner emits)
+// that adds a @require_token decorator above POST /device/command.
+const SIM_PATCH_DIFF = `--- a/app.py
++++ b/app.py
+@@ -148,6 +148,23 @@ reset_healthy()
++import os
++from functools import wraps
++
++
++def require_token(fn):
++    """CWE-306: require a bearer token on this state-changing route."""
++    @wraps(fn)
++    def _guard(*args, **kwargs):
++        expected = os.environ.get("DEVICE_SERVICE_TOKEN")
++        if not expected:
++            return jsonify({"error": "server token not configured"}), 403
++        sent = (request.headers.get("Authorization") or "").removeprefix("Bearer ").strip()
++        if not sent:
++            return jsonify({"error": "missing bearer token"}), 401
++        if sent != expected:
++            return jsonify({"error": "invalid bearer token"}), 403
++        return fn(*args, **kwargs)
++    return _guard
++
++
++@require_token
+ @app.post("/device/command")
+ def device_command():
+     body = request.get_json(silent=True) or {}
+`;
+
+const SIM_PATCH_THINKING =
+  'POST /device/command has no auth guard (CWE-306). ' +
+  'I will add a @require_token decorator that reads DEVICE_SERVICE_TOKEN and fails closed when it is unset.\n';
+const SIM_PATCH_TEXT =
+  'Adding a require_token decorator above the route: 401 on a missing bearer token, 403 when it is wrong or ' +
+  'no server token is configured, and mirroring reported_state to true_state so the caller can no longer desync ' +
+  'the reported view. Editing only app.py, keeping the diff minimal.\n';
+
+const SIM_REVIEW_TEXT =
+  'Checking the decorator is stacked directly above @app.post… reads DEVICE_SERVICE_TOKEN, no hard-coded secret… ' +
+  'fails closed when unset… reported_* now mirrors true_*… only app.py touched. Minimal and correct.\n';
+
+const SIM_REVIEW: PatchReview = {
+  verdict: 'approve', confidence: 0.88,
+  closesCwe306: true, requiresAuthNow: true, ignoresUntrustedOverrides: true, onlyAppPyTouched: true,
+  summary: 'Adds a bearer-token decorator above the route and mirrors reported→true. Minimal, closes CWE-306.',
+  issues: [{ severity: 'low', file: 'app.py', line: 171, note: 'Consider a constant-time token compare.' }],
+};
+
+const SIM_VERIFY = (): VerifyResult => ({
+  statusCode: 401, passed: true,
+  detail: 'Replayed the same unauthenticated POST /device/command — now 401 Unauthorized. Fan stayed on; reported mirrors true.',
+  true: { hr: 72, spo2: 98, fanOn: true, alarmActive: false },
+  ranAgainst: 'device-service/app.py',
 });
 
 function simReasoning(a: AuthorAgent): string {
@@ -105,10 +202,17 @@ export interface Pipeline {
   exploitStage: ExploitStage;
   serverBreach: DeliverResult | null;
   fanBreach: FlashResult | null;
+  patchAgent: WriterAgent | null;
+  reviewAgent: ReviewAgent | null;
+  approved: boolean;
+  verifyResult: VerifyResult | null;
   startScan: () => void;
   startExploit: () => void;
   sendToServer: () => void;
   sendToFan: () => void;
+  startPatch: () => void;
+  approve: () => void;
+  reject: () => void;
   reset: () => void;
 }
 
@@ -125,12 +229,18 @@ export function usePipeline(): Pipeline {
   const [exploitStage, setExploitStage] = useState<ExploitStage>('idle');
   const [serverBreach, setServerBreach] = useState<DeliverResult | null>(null);
   const [fanBreach, setFanBreach] = useState<FlashResult | null>(null);
+  const [patchAgent, setPatchAgent] = useState<WriterAgent | null>(null);
+  const [reviewAgent, setReviewAgent] = useState<ReviewAgent | null>(null);
+  const [approved, setApproved] = useState(false);
+  const [verifyResult, setVerifyResult] = useState<VerifyResult | null>(null);
 
   const authoredRef = useRef<Record<number, AuthoredCommand>>({});
   const serverFindingRef = useRef<number | null>(null);
   const fanFindingRef = useRef<number | null>(null);
   const timers = useRef<ReturnType<typeof setTimeout>[]>([]);
   const closeStream = useRef<(() => void) | null>(null);
+  const patchStreamClose = useRef<(() => void) | null>(null);
+  const patchSimRef = useRef(false);
   const modeRef = useRef<Mode>('connecting');
   modeRef.current = mode;
 
@@ -139,9 +249,11 @@ export function usePipeline(): Pipeline {
     timers.current = [];
     closeStream.current?.();
     closeStream.current = null;
+    patchStreamClose.current?.();
+    patchStreamClose.current = null;
   }, []);
 
-  const patchAgent = useCallback((id: string, partial: Partial<ScanAgent>) => {
+  const patchScanAgent = useCallback((id: string, partial: Partial<ScanAgent>) => {
     setAgents((prev) => prev.map((a) => (a.id === id ? { ...a, ...partial } : a)));
   }, []);
   const patchAuthor = useCallback((findingId: number, partial: Partial<AuthorAgent>) => {
@@ -206,11 +318,11 @@ export function usePipeline(): Pipeline {
     AGENT_SPEC.forEach((spec) => {
       const dur = SIM_AGENT_MS[spec.id] ?? 1500;
       const mine = SIM_FINDINGS.filter((f) => f.scanner === spec.tool && f.target === spec.target);
-      timers.current.push(setTimeout(() => patchAgent(spec.id, { state: 'running', startedAt: Date.now() }), acc));
+      timers.current.push(setTimeout(() => patchScanAgent(spec.id, { state: 'running', startedAt: Date.now() }), acc));
       acc += dur;
       timers.current.push(
         setTimeout(() => {
-          patchAgent(spec.id, { state: 'done', durationMs: dur, findingCount: mine.length });
+          patchScanAgent(spec.id, { state: 'done', durationMs: dur, findingCount: mine.length });
           setFindings((prev) => [...prev, ...mine]);
         }, acc),
       );
@@ -222,14 +334,14 @@ export function usePipeline(): Pipeline {
         setPhase('review');
       }, acc + 500),
     );
-  }, [patchAgent]);
+  }, [patchScanAgent]);
 
   const runScanLive = useCallback(() => {
     closeStream.current = api.streamScan(
       (e) => {
-        if (e.type === 'agent_started') patchAgent(e.agentId, { state: 'running', startedAt: Date.now() });
+        if (e.type === 'agent_started') patchScanAgent(e.agentId, { state: 'running', startedAt: Date.now() });
         else if (e.type === 'agent_finished') {
-          patchAgent(e.agentId, { state: 'done', durationMs: e.durationMs, findingCount: e.findingCount });
+          patchScanAgent(e.agentId, { state: 'done', durationMs: e.durationMs, findingCount: e.findingCount });
           setFindings((prev) => [...prev, ...e.findings]);
         } else if (e.type === 'ranking') {
           setFindings(e.findings);
@@ -246,7 +358,7 @@ export function usePipeline(): Pipeline {
         runScanSim();
       },
     );
-  }, [patchAgent, runScanSim]);
+  }, [patchScanAgent, runScanSim]);
 
   const startScan = useCallback(() => {
     clearTimers();
@@ -348,11 +460,157 @@ export function usePipeline(): Pipeline {
     else timers.current.push(setTimeout(() => done(SIM_FLASH()), 4200));
   }, []);
 
+  // ---- patch / review cell: Droid writes the fix, the reviewer audits it, the
+  //      human gate controls deploy, VERIFY re-runs the exploit against the edit ----
+  const runPatchSim = useCallback(() => {
+    patchSimRef.current = true;
+    const t = timers.current;
+    setExploitStage('patching');
+    setPatchAgent({
+      state: 'running', model: 'Factory Droid', usedFallback: true,
+      transcript: '', thinking: '', diff: '', diffEmpty: false, shieldBlocks: [], credits: null, durationMs: null,
+    });
+
+    const chunk = 14, stepMs = 42, base = 300;
+    let i = 0;
+    for (let pos = 0; pos < SIM_PATCH_THINKING.length; pos += chunk) {
+      const slice = SIM_PATCH_THINKING.slice(pos, pos + chunk);
+      t.push(setTimeout(() => setPatchAgent((p) => (p ? { ...p, thinking: p.thinking + slice } : p)), base + i * stepMs));
+      i += 1;
+    }
+    for (let pos = 0; pos < SIM_PATCH_TEXT.length; pos += chunk) {
+      const slice = SIM_PATCH_TEXT.slice(pos, pos + chunk);
+      t.push(setTimeout(() => setPatchAgent((p) => (p ? { ...p, transcript: p.transcript + slice } : p)), base + i * stepMs));
+      i += 1;
+    }
+    const afterWriter = base + i * stepMs + 200;
+    t.push(setTimeout(() => setPatchAgent((p) => (p ? { ...p, shieldBlocks: [...p.shieldBlocks, { command: 'git commit -am fix', reason: 'forbidden: git/push/commit/remote/… (deny-by-default scope)', ts: Date.now() }] } : p)), afterWriter));
+    t.push(setTimeout(() => setPatchAgent((p) => (p ? { ...p, credits: { factoryCredits: 12.4, inputTokens: 8123, outputTokens: 612, thinkingTokens: 1840 } } : p)), afterWriter + 120));
+    t.push(setTimeout(() => setPatchAgent((p) => (p ? { ...p, diff: SIM_PATCH_DIFF, diffEmpty: false, state: 'done', durationMs: afterWriter } : p)), afterWriter + 240));
+
+    const reviewStart = afterWriter + 520;
+    t.push(setTimeout(() => {
+      setExploitStage('reviewing');
+      setReviewAgent({ state: 'running', model: 'Factory Droid · read-only', transcript: '', verdict: null, structured: false });
+    }, reviewStart));
+    let j = 0;
+    for (let pos = 0; pos < SIM_REVIEW_TEXT.length; pos += chunk) {
+      const slice = SIM_REVIEW_TEXT.slice(pos, pos + chunk);
+      t.push(setTimeout(() => setReviewAgent((p) => (p ? { ...p, transcript: p.transcript + slice } : p)), reviewStart + 150 + j * stepMs));
+      j += 1;
+    }
+    const afterReview = reviewStart + 150 + j * stepMs + 200;
+    t.push(setTimeout(() => setReviewAgent((p) => (p ? { ...p, verdict: SIM_REVIEW, structured: false, state: 'done' } : p)), afterReview));
+    t.push(setTimeout(() => setExploitStage('awaiting_approval'), afterReview + 150));
+  }, []);
+
+  const startPatch = useCallback(() => {
+    clearTimers();
+    patchSimRef.current = false;
+    setPatchAgent(null);
+    setReviewAgent(null);
+    setApproved(false);
+    setVerifyResult(null);
+    setExploitStage('patching');
+
+    if (modeRef.current !== 'live') {
+      runPatchSim();
+      return;
+    }
+
+    patchStreamClose.current = api.streamPatch(
+      (e) => {
+        switch (e.type) {
+          case 'writer_started':
+            setExploitStage('patching');
+            setPatchAgent({
+              state: 'running', model: e.model, usedFallback: e.usedFallback,
+              transcript: '', thinking: '', diff: '', diffEmpty: false, shieldBlocks: [], credits: null, durationMs: null,
+            });
+            break;
+          case 'writer_delta':
+            setPatchAgent((p) => (p ? (e.channel === 'thinking' ? { ...p, thinking: p.thinking + e.text } : { ...p, transcript: p.transcript + e.text }) : p));
+            break;
+          case 'writer_tool':
+            break; // tool calls surface through the transcript; no separate field
+          case 'shield_blocked':
+            setPatchAgent((p) => (p ? { ...p, shieldBlocks: [...p.shieldBlocks, { command: e.command, reason: e.reason, ts: e.ts }] } : p));
+            break;
+          case 'credits':
+            setPatchAgent((p) => (p ? { ...p, credits: { factoryCredits: e.factoryCredits, inputTokens: e.inputTokens, outputTokens: e.outputTokens, thinkingTokens: e.thinkingTokens } } : p));
+            break;
+          case 'diff':
+            setPatchAgent((p) => (p ? { ...p, diff: e.diff, diffEmpty: e.empty, state: 'done' } : p));
+            break;
+          case 'reviewer_started':
+            setExploitStage('reviewing');
+            setReviewAgent({ state: 'running', model: e.model, transcript: '', verdict: null, structured: false });
+            break;
+          case 'reviewer_delta':
+            setReviewAgent((p) => (p ? { ...p, transcript: p.transcript + e.text } : p));
+            break;
+          case 'review_verdict':
+            setReviewAgent((p) => (p ? { ...p, verdict: e.review, structured: e.structured, state: 'done' } : p));
+            break;
+          case 'awaiting_approval':
+            setExploitStage('awaiting_approval');
+            setReviewAgent((p) => (p ? { ...p, verdict: p.verdict ?? e.verdict } : p));
+            break;
+          case 'patch_applied':
+            setExploitStage('verifying');
+            break;
+          case 'verify_result':
+            setVerifyResult({ statusCode: e.statusCode, passed: e.passed, detail: e.detail, true: e.true, ranAgainst: e.ranAgainst });
+            setExploitStage(e.passed ? 'verified' : 'patch_failed');
+            break;
+          case 'patch_rejected':
+            setExploitStage('patch_rejected');
+            break;
+          case 'patch_done':
+            patchStreamClose.current?.();
+            patchStreamClose.current = null;
+            break;
+        }
+      },
+      () => runPatchSim(),
+    );
+  }, [clearTimers, runPatchSim]);
+
+  const approve = useCallback(() => {
+    setApproved(true);
+    setExploitStage('applying');
+    if (patchSimRef.current) {
+      const t = timers.current;
+      t.push(setTimeout(() => setExploitStage('verifying'), 700));
+      t.push(setTimeout(() => {
+        setVerifyResult(SIM_VERIFY());
+        setExploitStage('verified');
+      }, 1700));
+      return;
+    }
+    // The real patch_applied → verify_result → patch_done tail arrives over the SSE stream.
+    void api.approve({ approvedBy: 'judge' }).catch(() => undefined);
+  }, []);
+
+  const reject = useCallback(() => {
+    setExploitStage('applying');
+    if (patchSimRef.current) {
+      timers.current.push(setTimeout(() => setExploitStage('patch_rejected'), 700));
+      return;
+    }
+    void api.reject().catch(() => undefined);
+  }, []);
+
   const startExploit = useCallback(() => {
     clearTimers();
     authoredRef.current = {};
+    patchSimRef.current = false;
     setServerBreach(null);
     setFanBreach(null);
+    setPatchAgent(null);
+    setReviewAgent(null);
+    setApproved(false);
+    setVerifyResult(null);
     const built = buildAuthors(findings, ranking);
     serverFindingRef.current = built.find((a) => a.target === 'device-service')?.findingId ?? built[0]?.findingId ?? null;
     fanFindingRef.current = built.find((a) => a.target === 'firmware')?.findingId ?? built[1]?.findingId ?? null;
@@ -364,6 +622,9 @@ export function usePipeline(): Pipeline {
 
   const reset = useCallback(() => {
     clearTimers();
+    patchStreamClose.current?.();
+    patchStreamClose.current = null;
+    patchSimRef.current = false;
     authoredRef.current = {};
     serverFindingRef.current = null;
     fanFindingRef.current = null;
@@ -375,14 +636,18 @@ export function usePipeline(): Pipeline {
     setExploitStage('idle');
     setServerBreach(null);
     setFanBreach(null);
+    setPatchAgent(null);
+    setReviewAgent(null);
+    setApproved(false);
+    setVerifyResult(null);
     setPhase(hardware.connected ? 'ready' : 'connect');
   }, [clearTimers, hardware.connected]);
 
   useEffect(() => () => clearTimers(), [clearTimers]);
 
   return useMemo(
-    () => ({ mode, phase, hardware, target, agents, findings, ranking, scanStartedAt, authorAgents, exploitStage, serverBreach, fanBreach, startScan, startExploit, sendToServer, sendToFan, reset }),
-    [mode, phase, hardware, target, agents, findings, ranking, scanStartedAt, authorAgents, exploitStage, serverBreach, fanBreach, startScan, startExploit, sendToServer, sendToFan, reset],
+    () => ({ mode, phase, hardware, target, agents, findings, ranking, scanStartedAt, authorAgents, exploitStage, serverBreach, fanBreach, patchAgent, reviewAgent, approved, verifyResult, startScan, startExploit, sendToServer, sendToFan, startPatch, approve, reject, reset }),
+    [mode, phase, hardware, target, agents, findings, ranking, scanStartedAt, authorAgents, exploitStage, serverBreach, fanBreach, patchAgent, reviewAgent, approved, verifyResult, startScan, startExploit, sendToServer, sendToFan, startPatch, approve, reject, reset],
   );
 }
 

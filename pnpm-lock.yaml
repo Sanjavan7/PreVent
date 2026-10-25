@@ -168,6 +168,9 @@ importers:
       '@prevent/contracts':
         specifier: workspace:*
         version: link:../contracts
+      '@prevent/realtime':
+        specifier: workspace:*
+        version: link:../realtime
       '@serialport/parser-readline':
         specifier: 13.0.0
         version: 13.0.0

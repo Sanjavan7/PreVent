@@ -10,11 +10,12 @@ import type { DeviceStatus } from '@prevent/contracts';
 import { ArduinoLink } from './arduino-link';
 import { createBackend } from './backend';
 
-const backend = createBackend();
-
 // Latest row wins; re-sent in full on every READY so a replug/reset resyncs the board.
 let latest: DeviceStatus | null = null;
 let lastFrame = '';
+
+// Set once the backend connects (mock is synchronous; live awaits the SpacetimeDB snapshot).
+let backend: Awaited<ReturnType<typeof createBackend>>;
 
 const link = new ArduinoLink({
   path: process.env.ARDUINO_SERIAL_PORT || undefined,
@@ -42,18 +43,30 @@ async function pushIrEvent(code: number): Promise<void> {
   }
 }
 
-const unsubscribe = backend.subscribeDeviceStatus((row) => {
-  latest = row;
-  pushLatest();
-});
+let unsubscribe: () => void = () => {};
 
-link.start();
+async function main(): Promise<void> {
+  // Start the serial link first so the board is found/opened while the backend connects
+  // (live mode awaits the SpacetimeDB subscription snapshot before the first row arrives).
+  link.start();
+
+  backend = await createBackend();
+  unsubscribe = backend.subscribeDeviceStatus((row) => {
+    latest = row;
+    pushLatest();
+  });
+}
 
 function shutdown(): void {
   unsubscribe();
   link.stop();
-  backend.close();
+  backend?.close();
   process.exit(0);
 }
 process.on('SIGINT', shutdown);
 process.on('SIGTERM', shutdown);
+
+main().catch((e) => {
+  console.error(`[bridge] fatal: ${(e as Error).message}`);
+  process.exit(1);
+});

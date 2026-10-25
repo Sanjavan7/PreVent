@@ -1,5 +1,5 @@
 // Confidence as a thin 4px bar + an inline % (NumberFlow via AnimatedNumber).
-// role="meter", NOT a gauge; the fill is always blue and never threshold-
+// role="meter", NOT a gauge; the fill is the accent and never threshold-
 // recolors. Uncertainty is shown on demand only.
 
 import { motion, useReducedMotion } from 'motion/react';
@@ -37,11 +37,11 @@ export function ConfidenceMeter({
       </div>
       <div
         className="mt-1 h-1 w-full overflow-hidden rounded-pill"
-        style={{ background: 'rgba(255,255,255,0.07)' }}
+        style={{ background: 'var(--color-surface-3)' }}
       >
         <motion.div
           className="h-full w-full origin-left rounded-pill"
-          style={{ background: 'var(--color-blue)' }}
+          style={{ background: 'var(--color-accent)' }}
           initial={reduce ? false : { scaleX: 0 }}
           animate={{ scaleX: clamped }}
           transition={{ duration: DUR.base, ease: EASE_OUT }}
