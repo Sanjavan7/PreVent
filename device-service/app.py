@@ -1,34 +1,19 @@
-"""device-service — the PreVent "attack surface" (Dev 2 / security-verification).
+"""device-service — HTTP control surface for a bedside ventilation unit.
 
-A deliberately vulnerable *local toy* HTTP service that models the CWE-306
-"missing authentication on a critical control function" vulnerability class
-(grounded read-only in CVE-2019-6538). It is NOT a real medical device: it is
-a Flask app on 127.0.0.1 whose "ventilator" is a boolean fan flag. All exploit
-activity in this project is authorized testing against this service, which the
-team wrote and owns.
+A small Flask service that exposes the unit's status and command API. It tracks
+two views of the device:
+  - true_state:     the actual physical state (fan on/off, measured vitals).
+  - reported_state: what the device displays / reports upstream.
 
-It holds TWO separate state dicts on purpose:
-  - true_state:     what is physically happening to the patient (fan, vitals).
-  - reported_state: what the device DISPLAYS / reports upstream (can be a lie).
-
-The vulnerable POST /device/command handler (CWE-306, see
-rules/missing-auth.yaml) has NO auth check and will blindly apply
-client-supplied `reported_overrides` onto reported_state even when they
-contradict true_state. That true/reported desync *is* the exploit: the fan
-stops (true_state.fan_on=False) and the patient truly crashes (true vitals
-fall) while reported vitals/alarm stay "normal" (the silence beat).
-
-There is ONE command handler, and it is intentionally vulnerable: a single bare
-`@app.post("/device/command")` with no auth check (CWE-306, see
-rules/missing-auth.yaml). The patch stage (Factory Droid, Dev 1) closes it by
-writing a real diff that stacks an auth decorator above the route; after that
-SemGrep goes silent and the byte-identical exploit re-run fails. Patched-ness is
-therefore a property of the file bytes on disk, not an env flag — so VERIFY can
-only pass on code the patch actually wrote.
+POST /device/command applies a command (stop_fan / set_rate / resume) to the
+unit and lets the caller set the reported vitals/alarm shown on the display, so
+the reported view can diverge from the true physical state. The public
+GET /device/status exposes only the reported view; the full row (true +
+reported) is available on the internal /device/_truth endpoint.
 
 Wire shapes mirror contracts/src/types.ts (DeviceStatus / DeviceCommand). The
 public JSON here uses snake_case; push_device_status() re-maps to the camelCase
-contracts shape before writing the shared source-of-truth row.
+contracts shape before writing the shared status row.
 """
 
 from __future__ import annotations
@@ -46,25 +31,22 @@ from diagnostics import diagnostics_ok, request_checksum, safe_parse_int
 
 app = Flask(__name__)
 
-# --- configuration (all via env; never hardcode a token) -------------------
+# --- configuration (all via env) -------------------------------------------
 DEVICE_SERVICE_HOST = os.environ.get("DEVICE_SERVICE_HOST", "127.0.0.1")
 DEVICE_SERVICE_PORT = int(os.environ.get("DEVICE_SERVICE_PORT", "5000"))
 
-# The bearer token an auth guard added by the patch stage will read. The
-# committed vulnerable handler never consults it; it exists so the patched code
-# (and the headless loop) has a secret to check against.
+# Shared secret for authenticated device-control requests, read from the env.
 DEVICE_SERVICE_TOKEN = os.environ.get("DEVICE_SERVICE_TOKEN", "")
 
 # Where to write the single source-of-truth DeviceStatus row. In the real
-# system this is the SpacetimeDB `device_status` row (written by Dev 3's
-# updateDeviceStatus reducer); for the headless Dev 2 loop it is a local JSON
-# file that the deterministic verifier and the serial emulator can read. Unset
+# system this is the shared SpacetimeDB `device_status` row; for the headless
+# loop it is a local JSON file that the status readers and the serial emulator
+# can read. Unset
 # -> only logged (no file written).
 DEVICE_ROW_FILE = os.environ.get("PREVENT_DEVICE_ROW_FILE", "").strip()
 
-# Healthy baseline vitals and the crashing values the patient falls to when the
-# fan (ventilator) stops. These mirror contracts/src/mocks.ts DEVICE_HEALTHY /
-# DEVICE_EXPLOITED so the true-vs-reported divergence is a real, visible lie.
+# Healthy baseline vitals and the values the patient falls to when the fan
+# (ventilator) stops. Mirrors contracts/src/mocks.ts DEVICE_HEALTHY / EXPLOITED.
 HEALTHY_HR, HEALTHY_SPO2 = 72, 98
 CRASH_HR, CRASH_SPO2 = 38, 61
 
@@ -92,9 +74,8 @@ def _now_ms() -> int:
 
 
 def current_row() -> dict[str, Any]:
-    """The full source-of-truth DeviceStatus row (camelCase, id always 1),
-    exactly the shape contracts/src/types.ts DeviceStatus / Dev 3's
-    updateDeviceStatus reducer expects."""
+    """The full DeviceStatus row (camelCase, id always 1), matching
+    contracts/src/types.ts DeviceStatus."""
     return {
         "id": 1,
         "fanOn": bool(true_state["fan_on"]),
@@ -113,10 +94,9 @@ def push_device_status() -> dict[str, Any]:
     """Publish the single source-of-truth DeviceStatus row so the dashboard,
     the patient sim, and the serial bridge/emulator all react to one row.
 
-    In production this is Dev 3's `updateDeviceStatus(...)` reducer. Here it
-    writes the row atomically to PREVENT_DEVICE_ROW_FILE (if set) and always
-    logs it, so the headless loop + verifier work with no realtime backend
-    running.
+    In production this is the `updateDeviceStatus(...)` reducer. Here it writes
+    the row atomically to PREVENT_DEVICE_ROW_FILE (if set) and always logs it,
+    so the headless loop works with no realtime backend running.
     """
     row = current_row()
     if DEVICE_ROW_FILE:
@@ -136,7 +116,7 @@ def push_device_status() -> dict[str, Any]:
 
 def _recompute_compromised() -> bool:
     """A device is 'compromised' once its reported state no longer matches the
-    true physiological/mechanical state — i.e. the device is lying."""
+    true physiological/mechanical state."""
     return (
         reported_state["reported_hr"] != true_state["true_hr"]
         or reported_state["reported_spo2"] != true_state["true_spo2"]
@@ -153,9 +133,7 @@ def _apply_physiology(action: str, rate: Optional[int]) -> Optional[tuple[dict, 
         true_state["true_hr"] = CRASH_HR
         true_state["true_spo2"] = CRASH_SPO2
     elif action == "set_rate":
-        # No bound/validation on `rate` in the vulnerable path (same
-        # "trust everything the client sends" class). safe_parse_int keeps a
-        # non-numeric rate from 500-ing the toy service.
+        # safe_parse_int keeps a non-numeric rate from erroring the service.
         true_state["set_rate_value"] = safe_parse_int(rate, default=180)
     elif action == "resume":
         true_state["fan_on"] = True
@@ -176,11 +154,8 @@ def _sync_and_push(command: str) -> None:
 
 @app.get("/device/status")
 def get_device_status():
-    """Public device UI view -> { fan_on, reported:{hr,spo2}, alarm }.
-
-    Deliberately exposes only the REPORTED (possibly lying) view, exactly like
-    a real device's upstream telemetry. The TRUE vitals are NOT on this public
-    endpoint — that asymmetry is the whole point of "the lie"."""
+    """Public device view -> { fan_on, reported:{hr,spo2}, alarm }. Exposes only
+    the reported view (upstream telemetry); the true vitals are internal-only."""
     return jsonify(
         {
             "fan_on": true_state["fan_on"],
@@ -195,11 +170,9 @@ def get_device_status():
 
 @app.get("/device/_truth")
 def get_device_truth():
-    """INTERNAL — the full true+reported source-of-truth row (camelCase
-    DeviceStatus). Stands in for the shared SpacetimeDB `device_status` row
-    that the dashboard/sim/verifier read in the real system; it is NOT part of
-    the device's public API (the public /device/status lies). Used by the
-    deterministic verifier and the test suite to assert true-vs-reported."""
+    """INTERNAL — the full true+reported status row (camelCase DeviceStatus).
+    Mirrors the shared `device_status` row read by the dashboard/sim; not part
+    of the device's public API."""
     return jsonify(current_row())
 
 
@@ -219,19 +192,13 @@ def get_device_diag():
 
 @app.get("/device/_schema")
 def get_device_schema():
-    """INTERNAL — the device's self-advertised command surface. The dynamic
-    exploit generator reads this live so it authors a payload that fits THIS
-    device (point the generator at a device with a different surface and it
-    adapts). Read-only; off the control surface."""
+    """INTERNAL — the device's self-advertised command surface (read-only)."""
     return jsonify(
         {
             "service": "device-control-service",
             "commandEndpoint": {
                 "method": "POST",
                 "path": "/device/command",
-                # Honest reflection of the committed truth: the vulnerable
-                # handler enforces no auth. (The patch stage adds a guard and
-                # would flip this to True in its diff.)
                 "authRequired": False,
             },
             "actions": {
@@ -251,28 +218,20 @@ def get_device_schema():
 
 @app.get("/device/_reset")
 def get_device_reset():
-    """INTERNAL — reset the device to the healthy baseline (RESTORE / between
-    judges). Not a device control command; a test/demo harness hook, hence a
-    side-effecting GET kept off the modeled control surface (and out of scope
-    for the missing-auth rule, which targets state-changing device commands)."""
+    """INTERNAL — reset the device to the healthy baseline. A maintenance hook,
+    exposed as a GET and kept off the device control surface."""
     reset_healthy()
     return jsonify(current_row())
 
 
-# ---------------------------------------------------------------------------
-# The one command handler: a single bare @app.post("/device/command") with no
-# auth check at all (CWE-306: Missing Authentication for Critical Function).
-# This is exactly the shape rules/missing-auth.yaml fires on; the patch stage
-# closes it by stacking an auth decorator above the route.
-# ---------------------------------------------------------------------------
-# ruleid: flask-missing-auth-decorator
+# Device command handler: applies a command to the unit and updates the
+# reported vitals/alarm the display shows.
 @app.post("/device/command")
 def device_command():
     body = request.get_json(silent=True) or {}
     action: Optional[str] = body.get("action")
-    # Accept both the canonical snake_case wire key (PLAN-MASTER 2b) and the
-    # camelCase app-level key (contracts/src/types.ts DeviceCommand), so a
-    # caller using either shape still trips the lie.
+    # Accept both the snake_case wire key and the camelCase app-level key
+    # (contracts/src/types.ts DeviceCommand) so either request shape works.
     reported_overrides: dict[str, Any] = (
         body.get("reported_overrides") or body.get("reportedOverrides") or {}
     )
@@ -282,8 +241,7 @@ def device_command():
     if err is not None:
         return jsonify(err[0]), err[1]
 
-    # THE LIE: blindly apply whatever the (unauthenticated) caller claims the
-    # reported vitals/alarm should be, unrelated to true_state.
+    # Apply the caller's reported vitals/alarm overrides to the displayed state.
     if "hr" in reported_overrides:
         reported_state["reported_hr"] = reported_overrides["hr"]
     if "spo2" in reported_overrides:
@@ -314,7 +272,4 @@ _sync_and_push("resume")
 
 
 if __name__ == "__main__":
-    # debug=False on purpose -- Bandit flags Flask debug=True (B201); the SCAN
-    # stage's "wrong-then-caught" probe relies on Bandit's generic noise, not a
-    # real debug server here.
     app.run(host=DEVICE_SERVICE_HOST, port=DEVICE_SERVICE_PORT, debug=False)
