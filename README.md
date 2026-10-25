@@ -41,7 +41,7 @@ Point PreVent at a device's code and plug in the device. One run, ten times in u
 | **Claude** (Anthropic Agent SDK) | The judgment layer. Triages the real CWE-306 flaw out of scanner decoys, with its reasoning streamed on screen. |
 | **Factory Droid** | A writer Droid patches the code behind a deny-by-default Droid Shield (no git, push or deploy); a read-only reviewer Droid returns a typed verdict. |
 | **SpacetimeDB** | One `device_status` row syncs the dashboard, the 3D ward and the Arduino. The approve reducer checks caller identity, so no agent can approve its own patch. |
-| **Fetch.ai / ASI:One** | The whole find, prove, patch, verify loop runs inside one chat as the `PreVent-Security` agent on Agentverse. |
+| **Fetch.ai / ASI:One** | A team on Agentverse. `PreVent-Security` still runs find, prove, human approval, fix, and re-verify in one chat. A ward case passes a bench note to patient-risk, then CVE knowledge, then a patch reviewer. A release captain can ask PreVent before a ship. The case does not start the audit or apply a fix. |
 | **Bitdeer / DeepSeek** | Writes the exploit, kept separate from the model that approves the fix. |
 | **Arduino** | A real fan, a stand-in for a ventilator, actuated by a live database row. |
 

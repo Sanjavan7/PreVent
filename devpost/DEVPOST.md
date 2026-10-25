@@ -34,7 +34,7 @@ Factory Droids do the patch. The writer runs behind a deny-by-default permission
 
 SpacetimeDB holds the shared state and the audit trail. The orchestrator and the hardware bridge write through reducers, and the dashboard, the 3D ward, and the Arduino all subscribe. The approve reducer checks the caller's identity and refuses to let the agent that proposed a patch also approve it. The live reasoning timeline streams separately over SSE from a small local control plane.
 
-Fetch.ai wraps the whole loop as the PreVent-Security agent on Agentverse, so the full loop, human gate included, runs inside one ASI:One chat.
+Fetch.ai puts the loop on Agentverse as eight ASI:One agents. PreVent-Security still runs find, prove, the human gate, the vetted fix, and re-verify in one chat. Ward-Orchestrator is the front door: a case passes a Bench-Monitor report to Patient-Risk, then CVE-Knowledge, then Patch-Reviewer. Release-Captain asks PreVent-Security before a ship. Evidence-Clerk signs the export only after a real 401 or 403 replay. The case itself does not start the audit or apply a fix.
 
 The thing you watch is the ward: eight rooms of vitals streaming green at 60fps until one flatlines mid-attack, then recovers the instant the patch lands, all driven by the same database row as the physical fan. The frontend is React, Vite and Tailwind, with PixiJS for the vitals waveforms and three.js for the ward. The hardware is an Arduino driving a fan through a motor driver, with a pressure sensor, an LCD, status LEDs and a buzzer; the fan stands in for a ventilator and the printed mask is the patient side of the circuit. We planned and sketched parts of this in Mana, including the hardware wiring graphic and our build playbook.
 
