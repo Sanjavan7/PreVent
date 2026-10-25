@@ -69,6 +69,7 @@ from scan.run_scanners import (  # noqa: E402
 # it never raises (falls back to a deterministic validated command).
 from generate.exploit import (  # noqa: E402
     DEEPSEEK_MODEL,
+    run_finding_conversation,
     stream_dynamic_payload,
 )
 
@@ -711,120 +712,87 @@ def _exploitable_findings() -> list[dict[str, Any]]:
     return exploitable
 
 
+def _all_findings_for_exploit() -> list[dict[str, Any]]:
+    """EVERY finding the scan surfaced (not just the exploitable ones): each gets
+    its own DeepSeek conversation node and the model decides exploitable-or-not.
+    Prefers an active cloned-repo scan; else the built-in demo scan (run cold)."""
+    if _ACTIVE_REPO.get("findings"):
+        return list(_ACTIVE_REPO["findings"])
+    if not _LAST_SCAN["findings"]:
+        findings, ranking = _compute_scan()
+        _LAST_SCAN["findings"] = findings
+        _LAST_SCAN["ranking"] = ranking
+    return list(_LAST_SCAN["findings"])
+
+
 def _exploit_stream(finding_id: int | None = None):
-    """Spawn one DeepSeek exploit-author agent per exploitable finding, in rank
-    order, STREAMING the model's live reasoning. For each finding we emit:
-        author_started  (with the exact prompt handed to the model)
-        author_delta     ... one per content chunk, as the model thinks ...
-        author_finished  (HONEST per-author wall-clock timing + validated command)
-    and, once all findings are authored, a final authors_done.
-
-    stream_dynamic_payload runs on a worker thread and pushes the prompt + each
-    delta onto a queue; this generator drains the queue and yields one SSE event
-    per item IMMEDIATELY (flush per delta), so the UI animates the real stream.
-    It never raises — a missing or declining model falls back to a deterministic
-    validated command whose synthesized reasoning is replayed as deltas (its
-    `source` becomes 'pre_cached_fallback').
-
-    When `finding_id` is given, only that one finding is authored (so the UI can
-    run the server stage and the fan stage separately); otherwise every
-    exploitable finding is authored, exactly as before."""
-    findings = _exploitable_findings()
+    """Spawn ONE DeepSeek conversation per scanner finding, ALL IN PARALLEL, and
+    multiplex their live turns over a single SSE stream (tagged by findingId).
+    Per finding: agent_spawned -> turn/delta... -> verdict -> payload? ->
+    agent_done; a final all_done once every conversation ends. Each conversation
+    runs run_finding_conversation (2 turns: analyze, then verdict + an authored
+    command + patient/patch risk) on its own worker thread; it never raises —
+    with no provider it synthesizes a paced ~10-12s conversation. With
+    ?finding=<id> only that one finding's conversation runs."""
+    findings = _all_findings_for_exploit()
     if finding_id is not None:
         findings = [f for f in findings if f.get("id") == finding_id]
-    for finding in findings:
-        file = finding.get("file", "")
-        target = finding.get("target", "")
-        finding_id = finding.get("id")
-        goal = _goal_for(file)
-        agent_id = f"author/{target}"
+    total = len(findings)
+    if total == 0:
+        yield _sse({"type": "all_done", "count": 0})
+        return
 
-        # Bridge stream_dynamic_payload's callbacks (prompt + deltas) to this
-        # generator's yields via a thread-safe queue: the author runs on a worker
-        # thread, we drain and emit as items arrive.
-        q: "queue.Queue[tuple[str, Any]]" = queue.Queue()
-        box: dict[str, Any] = {}
+    events: "queue.Queue[dict[str, Any]]" = queue.Queue()
 
-        def _on_prompt(prompt, _q=q):
-            _q.put(("prompt", prompt))
-
-        def _on_delta(text, _q=q):
-            _q.put(("delta", text))
-
-        def _worker(_goal=goal, _finding=finding, _q=q, _box=box):
-            try:
-                _box["result"] = stream_dynamic_payload(
-                    _goal, _finding, base_url=DEVICE_SERVICE_URL,
-                    on_delta=_on_delta, on_prompt=_on_prompt,
-                )
-            except Exception as exc:  # noqa: BLE001 -- recorded, surfaced below
-                _box["error"] = exc
-            finally:
-                _q.put(("done", None))
-
+    def _worker(f: dict[str, Any]):
+        fid = f.get("id")
         t0 = time.perf_counter()
-        worker = threading.Thread(target=_worker, daemon=True)
-        worker.start()
+        events.put({"type": "agent_spawned", "findingId": fid, "model": DEEPSEEK_MODEL,
+                    "file": f.get("file"), "target": f.get("target")})
+        source = "pre_cached_fallback"
+        try:
+            def _on_turn(idx: int, _fid=fid):
+                events.put({"type": "turn", "findingId": _fid, "role": "deepseek",
+                            "text": f"\n\n— DeepSeek turn {idx} —\n"})
 
-        started = False
+            def _on_delta(text: str, _fid=fid):
+                events.put({"type": "delta", "findingId": _fid, "role": "deepseek", "text": text})
 
-        def _emit_started(prompt):
-            return _sse(
-                {
-                    "type": "author_started",
-                    "agentId": agent_id,
-                    "findingId": finding_id,
-                    "target": target,
-                    "file": file,
-                    "model": DEEPSEEK_MODEL,
-                    "ts": _now_ms(),
-                    "prompt": prompt,
-                }
-            )
+            res = run_finding_conversation(f, base_url=DEVICE_SERVICE_URL,
+                                           on_delta=_on_delta, on_turn=_on_turn)
+            source = res.get("source", source)
+            events.put({"type": "verdict", "findingId": fid,
+                        "exploitable": bool(res.get("exploitable")),
+                        "rationale": res.get("rationale", "")})
+            if res.get("exploitable") and res.get("command"):
+                events.put({"type": "payload", "findingId": fid, "command": res.get("command"),
+                            "impact": res.get("impact", ""),
+                            "patientRisk": res.get("patientRisk", ""),
+                            "patchRisk": res.get("patchRisk", "")})
+        except Exception as exc:  # noqa: BLE001 -- surfaced as a not-exploitable verdict
+            source = "error"
+            events.put({"type": "verdict", "findingId": fid, "exploitable": False,
+                        "rationale": f"author error: {exc}"})
+        finally:
+            events.put({"type": "agent_done", "findingId": fid,
+                        "durationMs": int(round((time.perf_counter() - t0) * 1000)),
+                        "source": source})
 
-        while True:
-            kind, data = q.get()
-            if kind == "prompt":
-                started = True
-                yield _emit_started(data)
-            elif kind == "delta":
-                if not started:  # defensive: a delta before the prompt arrived
-                    started = True
-                    yield _emit_started({"system": "", "user": ""})
-                yield _sse(
-                    {
-                        "type": "author_delta",
-                        "agentId": agent_id,
-                        "findingId": finding_id,
-                        "text": data,
-                    }
-                )
-            else:  # "done"
-                break
+    threads = [threading.Thread(target=_worker, args=(f,), daemon=True) for f in findings]
+    for t in threads:
+        t.start()
 
-        worker.join()
-        duration_ms = int(round((time.perf_counter() - t0) * 1000))
-        if not started:  # no prompt, no delta (shouldn't happen) -> still announce
-            yield _emit_started({"system": "", "user": ""})
-        result = box.get("result") or {}
-
-        yield _sse(
-            {
-                "type": "author_finished",
-                "agentId": agent_id,
-                "findingId": finding_id,
-                "target": target,
-                "durationMs": duration_ms,
-                "model": result.get("modelId"),
-                "source": result.get("source"),
-                "command": result.get("command"),
-                "impact": result.get("impact"),
-                "rationale": result.get("rationale"),
-                "fullText": result.get("fullText"),
-            }
-        )
-
-    yield _sse({"type": "authors_done", "count": len(findings)})
+    # Drain the shared queue, flushing each event as it arrives, until every
+    # worker has emitted its single agent_done.
+    done = 0
+    while done < total:
+        ev = events.get()
+        yield _sse(ev)
+        if ev.get("type") == "agent_done":
+            done += 1
+    for t in threads:
+        t.join(timeout=1)
+    yield _sse({"type": "all_done", "count": total})
 
 
 @app.get("/api/exploit/stream")
@@ -1026,6 +994,16 @@ def _apply_diff_idempotent(diff_text: str) -> str:
             pass
 
 
+def _patch_parent_finding_id() -> int | None:
+    """The finding the patch closes — the exploitable device-service CWE-306 one —
+    so the UI can attach the Factory/Droid patch nodes to that DeepSeek node."""
+    exp = _exploitable_findings()
+    for f in exp:
+        if f.get("target") == "device-service" or str(f.get("file", "")).endswith("app.py"):
+            return f.get("id")
+    return exp[0].get("id") if exp else None
+
+
 def _patch_stream():
     """Spawn the Node patch runner (Factory Droid writer + read-only reviewer),
     relay each stdout JSON line verbatim as one SSE event, then SYNTHESIZE the
@@ -1042,6 +1020,9 @@ def _patch_stream():
     _PATCH_GATE.clear()
     _PATCH_PENDING.clear()
     _PATCH_DECISION.clear()
+    # The DeepSeek finding node this patch hangs off (the exploitable server
+    # CWE-306); every patch event carries it so the UI attaches the Factory nodes.
+    pid = _patch_parent_finding_id()
 
     # Windows-safe spawn: `node` against tsx's JS entry, with AGENTS_DIR as cwd
     # so the workspace tsconfig / node_modules resolve. The runner reads
@@ -1090,7 +1071,7 @@ def _patch_stream():
         # Track the proposed diff so APPROVE can deploy it (idempotently).
         elif obj.get("type") == "diff":
             diff_text = obj.get("diff", "") or ""
-        yield _sse(obj)
+        yield _sse({**obj, "parentFindingId": pid})
 
     worker.join()
     try:
@@ -1105,6 +1086,7 @@ def _patch_stream():
     yield _sse(
         {
             "type": "awaiting_approval",
+            "parentFindingId": pid,
             "diffRef": "device-service/app.py",
             "verdict": verdict,
         }
@@ -1132,6 +1114,7 @@ def _patch_stream():
         yield _sse(
             {
                 "type": "patch_applied",
+                "parentFindingId": pid,
                 "approvedBy": _PATCH_DECISION.get("approvedBy", "judge"),
                 "ranAgainst": app_py,
             }
@@ -1143,6 +1126,7 @@ def _patch_stream():
         yield _sse(
             {
                 "type": "verify_result",
+                "parentFindingId": pid,
                 "statusCode": outcome["statusCode"],
                 "passed": outcome["passed"],
                 "detail": outcome["detail"],
@@ -1151,7 +1135,7 @@ def _patch_stream():
             }
         )
         yield _sse(
-            {"type": "patch_done", "outcome": "verified" if outcome["passed"] else "failed"}
+            {"type": "patch_done", "parentFindingId": pid, "outcome": "verified" if outcome["passed"] else "failed"}
         )
     else:
         # Rejected: git-revert the device-service source back to the committed
@@ -1161,9 +1145,9 @@ def _patch_stream():
 
         result = git_revert_device_service(repo_root=REPO_ROOT)
         yield _sse(
-            {"type": "patch_rejected", "reverted": result.get("reverted", [])}
+            {"type": "patch_rejected", "parentFindingId": pid, "reverted": result.get("reverted", [])}
         )
-        yield _sse({"type": "patch_done", "outcome": "rejected"})
+        yield _sse({"type": "patch_done", "parentFindingId": pid, "outcome": "rejected"})
 
 
 @app.get("/api/patch/stream")
