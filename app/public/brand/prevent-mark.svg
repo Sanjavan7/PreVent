@@ -1,0 +1,38 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="PreVent — Vital Shield">
+  <defs>
+    <linearGradient id="c1shield" x1="128" y1="56" x2="384" y2="472" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#19C6DC"/>
+      <stop offset="0.55" stop-color="#1E7CF0"/>
+      <stop offset="1" stop-color="#1346C8"/>
+    </linearGradient>
+    <linearGradient id="c1sheen" x1="256" y1="40" x2="256" y2="300" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#ffffff" stop-opacity="0.22"/>
+      <stop offset="1" stop-color="#ffffff" stop-opacity="0"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Shield body: a single idea — the heartbeat is what the shield protects -->
+  <path d="M256 44
+           L432 108
+           L432 252
+           C432 360 356 436 256 470
+           C156 436 80 360 80 252
+           L80 108 Z"
+        fill="url(#c1shield)"/>
+  <path d="M256 44
+           L432 108
+           L432 252
+           C432 360 356 436 256 470
+           C156 436 80 360 80 252
+           L80 108 Z"
+        fill="url(#c1sheen)"/>
+
+  <!-- ECG pulse crossing the shield. White = unknown state entering the event. -->
+  <path d="M96 266 H168 L192 238 L216 294 L252 132"
+        fill="none" stroke="#FFFFFF" stroke-width="26"
+        stroke-linecap="round" stroke-linejoin="round"/>
+  <!-- Green = recovery to a verified-healthy rhythm after PreVent's fix -->
+  <path d="M252 132 L288 388 L318 266 H420"
+        fill="none" stroke="#5BF0C0" stroke-width="26"
+        stroke-linecap="round" stroke-linejoin="round"/>
+</svg>
