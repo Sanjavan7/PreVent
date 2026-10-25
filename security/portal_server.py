@@ -1,0 +1,444 @@
+"""PreVent portal control plane — local HTTP service for the security UI (Dev 2).
+
+A small Flask app (same Flask the device-service uses) that the Vite portal
+talks to. It is the read/observe side of the pipeline: it describes the target
+codebase, detects a plugged-in Arduino, serves source files, and — the main
+act — streams the REAL scanner fleet over Server-Sent Events with honest
+per-agent wall-clock timing. Nothing here is faked: every `durationMs` is a
+`time.perf_counter()` measurement of an actual semgrep/bandit invocation.
+
+Everything runs locally against the team's own repo (127.0.0.1). No external
+services, no new pip deps — CORS is set by hand so we don't pull in flask-cors.
+
+Run it:
+    PORTAL_PORT=8077 .venv/bin/python security/portal_server.py
+
+Endpoints:
+    GET /api/health        -> {"ok": true}
+    GET /api/hardware      -> plugged-in Arduino (via `arduino-cli board list`)
+    GET /api/target        -> the codebase under scan + the two planted vulns
+    GET /api/scan/stream   -> SSE: 4 scanner agents, honest timing, then ranking
+    GET /api/file?path=... -> a repo source file (path-escape guarded)
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import subprocess
+import sys
+import time
+from pathlib import Path
+from typing import Any
+
+from flask import Flask, Response, jsonify, request
+
+SECURITY_DIR = Path(__file__).resolve().parent
+REPO_ROOT = SECURITY_DIR.parent
+
+# Make the sibling stage modules importable by their package paths, exactly as
+# security/loop.py does, so `from scan.run_scanners import ...` resolves no
+# matter the CWD the server is launched from.
+sys.path.insert(0, str(SECURITY_DIR))
+
+from scan.run_scanners import (  # noqa: E402
+    DEVICE_SERVICE_DIR,
+    FIRMWARE_DIR,
+    FIRMWARE_RULES_DIR,
+    SEMGREP_RULES_DIR,
+    _SCAN_FLEET,
+    run_bandit,
+    run_semgrep,
+)
+
+app = Flask(__name__)
+
+# The Vite dev server lives on a different origin, so every response needs
+# permissive CORS. Done by hand (no flask-cors dependency).
+_ALLOWED_PORTAL_ORIGINS = ("http://127.0.0.1:5174", "http://localhost:5174")
+
+# Source files that make up the device under scan (what the fleet reads).
+_SCANNED_FILES: list[tuple[str, str]] = [
+    ("device-service/app.py", "python"),
+    ("device-service/diagnostics.py", "python"),
+    ("firmware/uno_actuator.ino", "cpp"),
+]
+
+# Directories a client may read source from via /api/file. Anything outside
+# these (or outside the repo root) is rejected.
+_ALLOWED_FILE_DIRS = ("device-service", "firmware", "security")
+
+# The two GENUINE CWE-306 findings the demo is built around — the server HTTP
+# handler and its device-side serial analog. Both grounded in CVE-2019-6538.
+_PLANTED_VULNS: list[dict[str, Any]] = [
+    {
+        "id": "server-cwe306",
+        "title": "Missing authentication on POST /device/command",
+        "cwe": "CWE-306",
+        "cveRef": "CVE-2019-6538",
+        "file": "device-service/app.py",
+        "line": 333,
+        "severity": "critical",
+        "note": (
+            "The vulnerable command handler has no auth decorator and no token "
+            "check — any unauthenticated caller can stop the fan and spoof the "
+            "reported vitals."
+        ),
+    },
+    {
+        "id": "firmware-cwe306",
+        "title": "Unauthenticated serial STATE control channel",
+        "cwe": "CWE-306",
+        "cveRef": "CVE-2019-6538",
+        "file": "firmware/uno_actuator.ino",
+        "line": 248,
+        "severity": "critical",
+        "note": (
+            "handleState() applies any STATE frame off the serial link with no "
+            "authentication — the device-side analog of the server flaw."
+        ),
+    },
+]
+
+_EXT_LANG = {".py": "python", ".ino": "cpp", ".yaml": "yaml", ".yml": "yaml"}
+
+
+def _now_ms() -> int:
+    return int(time.time() * 1000)
+
+
+# ------------------------------------------------------------------- CORS ----
+
+@app.before_request
+def _handle_preflight():
+    """Answer CORS preflight (OPTIONS) with a bare 204; the real CORS headers
+    are attached by _cors() below (runs on this response too)."""
+    if request.method == "OPTIONS":
+        return ("", 204)
+    return None
+
+
+@app.after_request
+def _cors(resp: Response) -> Response:
+    """Permissive CORS on every response so the Vite app (:5174) can call us."""
+    resp.headers["Access-Control-Allow-Origin"] = "*"
+    resp.headers["Access-Control-Allow-Headers"] = "*"
+    resp.headers["Access-Control-Allow-Methods"] = "*"
+    return resp
+
+
+# ----------------------------------------------------------------- health ----
+
+@app.get("/api/health")
+def health():
+    return jsonify({"ok": True})
+
+
+# --------------------------------------------------------------- hardware ----
+
+# Tiny TTL cache so the portal can poll hardware cheaply without shelling out
+# to arduino-cli on every request.
+_HW_CACHE: dict[str, Any] = {"ts": 0.0, "value": None}
+_HW_TTL_S = 1.5
+_HW_NONE = {"connected": False, "board": None, "port": None, "fqbn": None}
+
+
+def _parse_board_list_table(stdout: str) -> list[dict[str, str]]:
+    """Parse the `arduino-cli board list` table into row dicts.
+
+    arduino-cli prints a left-aligned, space-padded table (tabwriter), so cells
+    can contain spaces ('Serial Port (USB)', 'Arduino UNO R4 WiFi'). We recover
+    them by slicing each data row at the column start positions of the header
+    labels — header and data share the same left edges, so this reconstructs
+    multi-word cells that a naive whitespace split would mangle.
+    """
+    lines = [ln for ln in stdout.splitlines() if ln.strip()]
+    if not lines:
+        return []
+    header = lines[0]
+    labels = ("Port", "Protocol", "Type", "Board Name", "FQBN", "Core")
+    starts: list[int] = []
+    present: list[str] = []
+    search_from = 0
+    for label in labels:
+        idx = header.find(label, search_from)
+        if idx == -1:
+            continue
+        starts.append(idx)
+        present.append(label)
+        search_from = idx + len(label)
+    rows: list[dict[str, str]] = []
+    for line in lines[1:]:
+        row: dict[str, str] = {}
+        for i, label in enumerate(present):
+            start = starts[i]
+            end = starts[i + 1] if i + 1 < len(starts) else len(line)
+            row[label] = line[start:end].strip() if start < len(line) else ""
+        rows.append(row)
+    return rows
+
+
+def _detect_arduino(stdout: str) -> dict[str, Any]:
+    """Pick the Arduino row: Type mentions USB, or Board Name / FQBN mentions
+    Arduino (the row shape in the plan's example)."""
+    for row in _parse_board_list_table(stdout):
+        typ = row.get("Type", "")
+        board = row.get("Board Name", "")
+        fqbn = row.get("FQBN", "")
+        if "USB" in typ.upper() or "ARDUINO" in board.upper() or "ARDUINO" in fqbn.upper():
+            return {
+                "connected": True,
+                "board": board or None,
+                "port": row.get("Port") or None,
+                "fqbn": fqbn or None,
+            }
+    return dict(_HW_NONE)
+
+
+@app.get("/api/hardware")
+def hardware():
+    """Detect a plugged-in Arduino via `arduino-cli board list`. Never 500s:
+    a missing/erroring CLI just reports 'not connected'. Cached ~1.5s."""
+    now = time.monotonic()
+    if _HW_CACHE["value"] is not None and now - _HW_CACHE["ts"] < _HW_TTL_S:
+        return jsonify(_HW_CACHE["value"])
+
+    try:
+        proc = subprocess.run(
+            ["arduino-cli", "board", "list"],
+            capture_output=True,
+            text=True,
+            timeout=8.0,
+        )
+        value = _detect_arduino(proc.stdout) if proc.returncode == 0 else dict(_HW_NONE)
+    except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
+        # arduino-cli absent, hung, or otherwise unhappy -> honest "no board".
+        value = dict(_HW_NONE)
+
+    _HW_CACHE["ts"] = now
+    _HW_CACHE["value"] = value
+    return jsonify(value)
+
+
+# ----------------------------------------------------------------- target ----
+
+def _loc(rel_path: str) -> int:
+    """Line count of a repo source file (0 if it has vanished)."""
+    try:
+        return len((REPO_ROOT / rel_path).read_text(encoding="utf-8", errors="replace").splitlines())
+    except OSError:
+        return 0
+
+
+@app.get("/api/target")
+def target():
+    """Describe the codebase the fleet scans: the three source files and the
+    two planted CWE-306 vulnerabilities."""
+    return jsonify(
+        {
+            "name": "prevent-device",
+            "root": str(REPO_ROOT),
+            "files": [
+                {"path": path, "lang": lang, "loc": _loc(path)}
+                for path, lang in _SCANNED_FILES
+            ],
+            "plantedVulns": _PLANTED_VULNS,
+        }
+    )
+
+
+# -------------------------------------------------------------- scan/SSE ----
+
+def _cvss_for(finding: dict[str, Any]) -> float:
+    """Deterministic CVSS score by (scanner, file) then (scanner, ruleId),
+    with a severity-based fallback. The two semgrep CWE-306 findings score
+    highest; the bandit decoys score low."""
+    scanner = finding.get("scanner", "")
+    file = finding.get("file", "")
+    rule = finding.get("ruleId", "")
+    severity = str(finding.get("severity", "")).upper()
+
+    if scanner == "semgrep" and file.endswith("app.py"):
+        return 9.3
+    if scanner == "semgrep" and file.endswith("uno_actuator.ino"):
+        return 8.8
+    if scanner == "bandit" and rule == "B324":
+        return 5.9
+    if scanner == "bandit" and rule == "B105":
+        return 2.5
+    if scanner == "bandit" and rule == "B110":
+        return 2.0
+    if severity in ("ERROR", "HIGH"):
+        return 5.0
+    if severity == "MEDIUM":
+        return 4.0
+    return 2.0
+
+
+def _verdict_for(finding: dict[str, Any]) -> str:
+    """One-sentence human verdict that explains the ranking."""
+    scanner = finding.get("scanner", "")
+    file = finding.get("file", "")
+    rule = finding.get("ruleId", "")
+
+    if scanner == "semgrep" and file.endswith("app.py"):
+        return "Top CVSS. Unauthenticated command channel — the server analog of CVE-2019-6538."
+    if scanner == "semgrep" and file.endswith("uno_actuator.ino"):
+        return "Same flaw on the device: forge a STATE frame, no auth on the serial link."
+    if scanner == "bandit" and rule == "B324":
+        return "Demoted: HIGH severity, but not an exploitable control path."
+    return "Low. No path to device control."
+
+
+def rank_findings(findings: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Deterministic ranking: the exploitable (semgrep CWE-306) findings first,
+    then by CVSS descending. 'real' marks the two genuine control-path vulns;
+    bandit hits are decoys. Returns one item per finding:
+    {rank, findingId, cvss, real, verdict}."""
+    scored = []
+    for f in findings:
+        real = f.get("scanner") == "semgrep"
+        cvss = _cvss_for(f)
+        scored.append((f, real, cvss))
+
+    # real first, then CVSS desc; findingId as a stable final tiebreak.
+    scored.sort(key=lambda t: (0 if t[1] else 1, -t[2], t[0].get("id", 0)))
+
+    ranking: list[dict[str, Any]] = []
+    for rank, (f, real, cvss) in enumerate(scored, start=1):
+        ranking.append(
+            {
+                "rank": rank,
+                "findingId": f.get("id"),
+                "cvss": cvss,
+                "real": real,
+                "verdict": _verdict_for(f),
+            }
+        )
+    return ranking
+
+
+def _sse(obj: dict[str, Any]) -> str:
+    """Encode one SSE `data:` message (double newline terminates the event)."""
+    return f"data: {json.dumps(obj)}\n\n"
+
+
+def _scan_stream():
+    """Run the 4-agent scanner fleet in order, emitting an agent_started /
+    agent_finished SSE pair per agent with HONEST per-agent wall-clock timing,
+    then a final ranking and a scan_done. Every scan is a real subprocess."""
+    all_findings: list[dict[str, Any]] = []
+    gid = 0  # globally-unique finding id across all agents
+    total_t0 = time.perf_counter()
+
+    for tool, target_name, language, target_dir, rules_dir in _SCAN_FLEET:
+        agent_id = f"{tool}/{target_name}"
+        yield _sse(
+            {
+                "type": "agent_started",
+                "agentId": agent_id,
+                "tool": tool,
+                "target": target_name,
+                "language": language,
+                "ts": _now_ms(),
+            }
+        )
+
+        t0 = time.perf_counter()
+        if tool == "semgrep" and rules_dir:
+            found = run_semgrep(target_dir, rules_dir)
+        else:
+            found = run_bandit(target_dir)
+        duration_ms = int(round((time.perf_counter() - t0) * 1000))
+
+        # Tag each finding with a global id and its target (server vs firmware).
+        for f in found:
+            gid += 1
+            f["id"] = gid
+            f["target"] = target_name
+        all_findings.extend(found)
+
+        yield _sse(
+            {
+                "type": "agent_finished",
+                "agentId": agent_id,
+                "tool": tool,
+                "target": target_name,
+                "language": language,
+                "durationMs": duration_ms,
+                "findingCount": len(found),
+                "findings": found,
+            }
+        )
+
+    total_ms = int(round((time.perf_counter() - total_t0) * 1000))
+    yield _sse(
+        {
+            "type": "ranking",
+            "findings": all_findings,
+            "ranking": rank_findings(all_findings),
+            "durationMs": total_ms,
+        }
+    )
+    yield _sse({"type": "scan_done"})
+
+
+@app.get("/api/scan/stream")
+def scan_stream():
+    resp = Response(_scan_stream(), mimetype="text/event-stream")
+    # Keep proxies/dev-servers from buffering the stream so each agent beat
+    # reaches the UI as it happens.
+    resp.headers["Cache-Control"] = "no-cache"
+    resp.headers["X-Accel-Buffering"] = "no"
+    return resp
+
+
+# ------------------------------------------------------------------- file ----
+
+def _safe_repo_file(rel_path: str) -> Path | None:
+    """Resolve a repo-relative path and reject anything that escapes the repo
+    root or lands outside the allowed source dirs. Returns the resolved Path
+    for a readable file, or None to signal a 400."""
+    if not rel_path:
+        return None
+    try:
+        candidate = (REPO_ROOT / rel_path).resolve()
+        rel = candidate.relative_to(REPO_ROOT)  # raises if it escaped the root
+    except (ValueError, OSError):
+        return None
+    if not rel.parts or rel.parts[0] not in _ALLOWED_FILE_DIRS:
+        return None
+    if not candidate.is_file():
+        return None
+    return candidate
+
+
+@app.get("/api/file")
+def file():
+    rel_path = request.args.get("path", "")
+    resolved = _safe_repo_file(rel_path)
+    if resolved is None:
+        return jsonify({"error": "path not allowed"}), 400
+    content = resolved.read_text(encoding="utf-8", errors="replace")
+    return jsonify(
+        {
+            "path": str(resolved.relative_to(REPO_ROOT)),
+            "lang": _EXT_LANG.get(resolved.suffix.lower(), "text"),
+            "content": content,
+            "lines": len(content.splitlines()),
+        }
+    )
+
+
+# ------------------------------------------------------------------- main ----
+
+def main() -> None:
+    host = os.environ.get("PORTAL_HOST", "127.0.0.1")
+    port = int(os.environ.get("PORTAL_PORT", "8077"))
+    # threaded=True so the SSE stream (a long-lived response) doesn't block the
+    # other endpoints — same dev-server posture as device-service/app.py.
+    app.run(host=host, port=port, threaded=True, debug=False)
+
+
+if __name__ == "__main__":
+    main()
