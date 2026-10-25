@@ -1,6 +1,7 @@
-// A single shiki highlighter loaded with only the grammars this app needs
-// (python, C/C++, yaml) and one dark theme — so the bundle doesn't ship every
-// language grammar shiki supports.
+// A single shiki highlighter loaded with the grammars this app needs: the demo
+// device (python, C/C++, yaml) plus the common languages an arbitrary scanned
+// GitHub repo tends to be written in. Anything else renders as plain 'text'
+// (see langFor in CodeViewer) so an unknown grammar never throws.
 
 import { createHighlighterCore, type HighlighterCore } from 'shiki/core';
 import { createOnigurumaEngine } from 'shiki/engine/oniguruma';
@@ -17,6 +18,16 @@ export function getHighlighter(): Promise<HighlighterCore> {
         import('shiki/langs/python.mjs'),
         import('shiki/langs/cpp.mjs'),
         import('shiki/langs/yaml.mjs'),
+        import('shiki/langs/javascript.mjs'),
+        import('shiki/langs/typescript.mjs'),
+        import('shiki/langs/tsx.mjs'),
+        import('shiki/langs/go.mjs'),
+        import('shiki/langs/rust.mjs'),
+        import('shiki/langs/java.mjs'),
+        import('shiki/langs/ruby.mjs'),
+        import('shiki/langs/php.mjs'),
+        import('shiki/langs/json.mjs'),
+        import('shiki/langs/bash.mjs'),
       ],
       engine: createOnigurumaEngine(import('shiki/wasm')),
     });

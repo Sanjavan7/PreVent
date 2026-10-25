@@ -13,6 +13,7 @@ import { CodeViewer } from './review/CodeViewer';
 import { AgentGraph } from './exploit/AgentGraph';
 import { AgentDetail } from './exploit/AgentDetail';
 import { buildGraph } from './exploit/graphModel';
+import { ArrowCircle } from './icons/ArrowCircle';
 
 const STAGE_WORD: Record<string, string> = {
   curating_server: 'curating server exploit',
@@ -35,7 +36,7 @@ const STAGE_WORD: Record<string, string> = {
 
 export function PortalApp() {
   const pipeline = usePipeline();
-  const { mode, phase, hardware, agents, findings, ranking, authorAgents, exploitStage, serverBreach, fanBreach, patchAgent, reviewAgent, approved, verifyResult, startScan, startExploit, sendToServer, sendToFan, startPatch, approve, reject, reset } = pipeline;
+  const { mode, phase, hardware, agents, scanSource, activeRepo, findings, ranking, authorAgents, exploitStage, serverBreach, fanBreach, patchAgent, reviewAgent, approved, verifyResult, startScan, startExploit, sendToServer, sendToFan, startPatch, approve, reject, reset } = pipeline;
 
   const [selected, setSelected] = useState<ScanFinding | null>(null);
   const [selectedNode, setSelectedNode] = useState<string>('author-server');
@@ -76,48 +77,52 @@ export function PortalApp() {
 
   return (
     <div className="flex h-full flex-col bg-bg text-text">
-      <header className="flex items-center justify-between gap-4 px-5 py-3">
-        <div className="flex items-center gap-4">
-          <span className="text-lg font-bold tracking-tight">Pre<span className="text-accent">Vent</span></span>
-          <span className="flex items-center gap-2">
+      <header className="sticky top-0 z-30 flex flex-wrap items-center justify-between gap-3 border-b border-glass-border bg-glass-bg px-5 py-2.5 backdrop-blur-[14px] [box-shadow:0_1px_0_0_rgba(255,255,255,0.7),0_1px_12px_-6px_rgba(10,40,38,0.12)]">
+        <div className="flex items-center gap-3">
+          <span className="font-display text-[19px] font-normal tracking-[-0.01em] text-text">Pre<span className="text-accent">Vent</span></span>
+          <span className="flex items-center gap-2 rounded-pill border border-glass-border bg-glass-bg px-2.5 py-1 backdrop-blur-[14px]">
             <span className={`gem ${hardware.connected ? 'text-success' : 'text-text-muted'} ${phase === 'scanning' || live ? 'gem--live text-accent' : ''}`} style={{ width: 7, height: 7 }} />
-            <span className="text-meta text-text-secondary">{statusWord}</span>
+            <span className="text-meta capitalize text-text-secondary">{statusWord}</span>
           </span>
           {hardware.connected && (
-            <span className="hidden font-mono text-meta text-text-muted sm:inline">
-              {hardware.board} <span className="text-text-muted">· {hardware.port}</span>
+            <span className="hidden rounded-pill bg-surface-2 px-2.5 py-1 font-mono text-meta text-text-muted sm:inline">
+              {hardware.board} <span className="opacity-60">· {hardware.port}</span>
             </span>
           )}
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           {exploitStage === 'server_ready' && (
-            <button type="button" onClick={sendToServer} className="press state-transition rounded-md bg-accent-bg px-3 py-1.5 text-sm font-medium text-accent-fg hover:bg-surface-3">
+            <button type="button" onClick={sendToServer} className="btn btn--primary animate-enter group px-4 py-1.5 text-sm">
               Send to server
+              <ArrowCircle size={16} className="transition-transform group-hover:translate-x-0.5" />
             </button>
           )}
           {exploitStage === 'fan_ready' && (
-            <button type="button" onClick={sendToFan} className="press state-transition glow-red rounded-md bg-danger-bg px-3 py-1.5 text-sm font-medium text-danger-fg hover:bg-surface-3">
+            <button type="button" onClick={sendToFan} className="btn btn--danger animate-enter group px-4 py-1.5 text-sm">
               Send to fan — flash board
+              <ArrowCircle size={16} className="transition-transform group-hover:translate-x-0.5" />
             </button>
           )}
           {exploitStage === 'fan_breached' && (
-            <button type="button" onClick={startPatch} className="press state-transition rounded-md bg-accent-bg px-3 py-1.5 text-sm font-medium text-accent-fg hover:bg-surface-3">
+            <button type="button" onClick={startPatch} className="btn btn--primary animate-enter group px-4 py-1.5 text-sm">
               Generate fix (Droid)
+              <ArrowCircle size={16} className="transition-transform group-hover:translate-x-0.5" />
             </button>
           )}
-          {phase === 'review' && (
-            <button type="button" onClick={startExploit} className="press state-transition rounded-md bg-accent-bg px-3 py-1.5 text-sm font-medium text-accent-fg hover:bg-surface-3">
+          {phase === 'review' && scanSource !== 'repo' && (
+            <button type="button" onClick={startExploit} className="btn btn--primary animate-enter group px-4 py-1.5 text-sm">
               Generate exploits
+              <ArrowCircle size={16} className="transition-transform group-hover:translate-x-0.5" />
             </button>
           )}
           {phase === 'review' && (
-            <button type="button" onClick={startScan} className="press state-transition rounded-md px-3 py-1.5 text-sm text-text-secondary hover:bg-surface-2">
+            <button type="button" onClick={() => startScan(scanSource === 'repo' ? activeRepo ?? undefined : undefined)} className="btn btn--ghost px-4 py-1.5 text-sm">
               Rescan
             </button>
           )}
           {working && (
-            <button type="button" onClick={onReset} className="press state-transition rounded-md px-3 py-1.5 text-sm text-text-secondary hover:bg-surface-2">
+            <button type="button" onClick={onReset} className="btn btn--ghost px-4 py-1.5 text-sm">
               Reset
             </button>
           )}
@@ -137,7 +142,7 @@ export function PortalApp() {
           <div className="grid min-h-0 flex-1 grid-cols-1 gap-3 lg:grid-cols-[minmax(320px,0.9fr)_minmax(0,1.6fr)]">
             <FindingsList findings={findings} ranking={ranking} selectedId={selected?.id ?? null} onSelect={setSelected} scanning={phase === 'scanning'} />
             {selected ? (
-              <CodeViewer finding={selected} />
+              <CodeViewer finding={selected} repo={scanSource === 'repo'} />
             ) : (
               <section className="panel grid-field flex min-h-0 flex-1 items-center justify-center">
                 <p className="text-sm text-text-muted">{phase === 'scanning' ? 'Findings open here as the agents report.' : 'Select a finding to view the vulnerable code.'}</p>

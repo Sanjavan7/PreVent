@@ -195,6 +195,9 @@ export interface Pipeline {
   hardware: Hardware;
   target: Target | null;
   agents: ScanAgent[];
+  scanSource: 'device' | 'repo';
+  activeRepo: { owner: string; name: string } | null;
+  scanError: string | null;
   findings: ScanFinding[];
   ranking: RankItem[];
   scanStartedAt: number | null;
@@ -206,7 +209,7 @@ export interface Pipeline {
   reviewAgent: ReviewAgent | null;
   approved: boolean;
   verifyResult: VerifyResult | null;
-  startScan: () => void;
+  startScan: (repo?: { owner: string; name: string }) => void;
   startExploit: () => void;
   sendToServer: () => void;
   sendToFan: () => void;
@@ -222,6 +225,9 @@ export function usePipeline(): Pipeline {
   const [hardware, setHardware] = useState<Hardware>(DISCONNECTED);
   const [target, setTarget] = useState<Target | null>(null);
   const [agents, setAgents] = useState<ScanAgent[]>(freshAgents);
+  const [scanSource, setScanSource] = useState<'device' | 'repo'>('device');
+  const [activeRepo, setActiveRepo] = useState<{ owner: string; name: string } | null>(null);
+  const [scanError, setScanError] = useState<string | null>(null);
   const [findings, setFindings] = useState<ScanFinding[]>([]);
   const [ranking, setRanking] = useState<RankItem[]>([]);
   const [scanStartedAt, setScanStartedAt] = useState<number | null>(null);
@@ -360,16 +366,81 @@ export function usePipeline(): Pipeline {
     );
   }, [patchScanAgent, runScanSim]);
 
-  const startScan = useCallback(() => {
+  // ---- repo scan: real clone + scan of an arbitrary public GitHub repo ----
+  // Reuses the exact scan event shape, so ScanStrip / FindingsList / CodeViewer
+  // are unchanged. No sim fallback: there is no fixture for an arbitrary repo.
+  const runRepoScanLive = useCallback((repo: { owner: string; name: string }) => {
+    const label = `${repo.owner}/${repo.name}`;
+    // Seed one visible card so the fleet strip isn't empty during the clone.
+    setAgents([
+      { id: `semgrep/${repo.name}`, tool: 'semgrep', target: label, language: 'multi-language', state: 'idle', startedAt: null, durationMs: null, findingCount: 0 },
+    ]);
+    const upsert = (id: string, tool: 'semgrep' | 'bandit', language: string, partial: Partial<ScanAgent>) =>
+      setAgents((prev) =>
+        prev.some((a) => a.id === id)
+          ? prev.map((a) => (a.id === id ? { ...a, ...partial } : a))
+          : [...prev, { id, tool, target: label, language, state: 'idle', startedAt: null, durationMs: null, findingCount: 0, ...partial }],
+      );
+    const fail = (message: string) => {
+      setScanError(message);
+      setAgents([]);
+      setScanSource('device');
+      setActiveRepo(null);
+      setPhase(hardware.connected ? 'ready' : 'connect');
+      closeStream.current?.();
+      closeStream.current = null;
+    };
+    closeStream.current = api.streamRepoScan(
+      label,
+      (e) => {
+        if (e.type === 'agent_started') {
+          if (e.tool === 'git') return; // the clone step is not a fleet card
+          upsert(e.agentId, e.tool as 'semgrep' | 'bandit', e.language, { state: 'running', startedAt: Date.now() });
+        } else if (e.type === 'agent_finished') {
+          if (e.tool === 'git') return;
+          upsert(e.agentId, e.tool as 'semgrep' | 'bandit', e.language, { state: 'done', durationMs: e.durationMs, findingCount: e.findingCount });
+          setFindings((prev) => [...prev, ...e.findings]);
+        } else if (e.type === 'ranking') {
+          setFindings(e.findings);
+          setRanking(e.ranking);
+        } else if (e.type === 'scan_done') {
+          setPhase('review');
+          closeStream.current?.();
+          closeStream.current = null;
+        } else if (e.type === 'scan_error') {
+          fail(e.message);
+        }
+      },
+      () => fail('control service unreachable — could not scan the repository'),
+    );
+  }, [hardware.connected]);
+
+  const startScan = useCallback((repo?: { owner: string; name: string }) => {
     clearTimers();
-    setAgents(freshAgents());
     setFindings([]);
     setRanking([]);
+    setScanError(null);
     setScanStartedAt(Date.now());
     setPhase('scanning');
+    if (repo) {
+      setScanSource('repo');
+      setActiveRepo(repo);
+      setAgents([]);
+      if (modeRef.current === 'live') runRepoScanLive(repo);
+      else {
+        setScanError('repo scanning needs the control service running');
+        setScanSource('device');
+        setActiveRepo(null);
+        setPhase(hardware.connected ? 'ready' : 'connect');
+      }
+      return;
+    }
+    setScanSource('device');
+    setActiveRepo(null);
+    setAgents(freshAgents());
     if (modeRef.current === 'live') runScanLive();
     else runScanSim();
-  }, [clearTimers, runScanLive, runScanSim]);
+  }, [clearTimers, runScanLive, runScanSim, runRepoScanLive, hardware.connected]);
 
   // ---- exploit: curate one author (streaming), live or simulated ----
   const curateSim = useCallback(
@@ -629,6 +700,9 @@ export function usePipeline(): Pipeline {
     serverFindingRef.current = null;
     fanFindingRef.current = null;
     setAgents(freshAgents());
+    setScanSource('device');
+    setActiveRepo(null);
+    setScanError(null);
     setFindings([]);
     setRanking([]);
     setScanStartedAt(null);
@@ -646,8 +720,8 @@ export function usePipeline(): Pipeline {
   useEffect(() => () => clearTimers(), [clearTimers]);
 
   return useMemo(
-    () => ({ mode, phase, hardware, target, agents, findings, ranking, scanStartedAt, authorAgents, exploitStage, serverBreach, fanBreach, patchAgent, reviewAgent, approved, verifyResult, startScan, startExploit, sendToServer, sendToFan, startPatch, approve, reject, reset }),
-    [mode, phase, hardware, target, agents, findings, ranking, scanStartedAt, authorAgents, exploitStage, serverBreach, fanBreach, patchAgent, reviewAgent, approved, verifyResult, startScan, startExploit, sendToServer, sendToFan, startPatch, approve, reject, reset],
+    () => ({ mode, phase, hardware, target, agents, scanSource, activeRepo, scanError, findings, ranking, scanStartedAt, authorAgents, exploitStage, serverBreach, fanBreach, patchAgent, reviewAgent, approved, verifyResult, startScan, startExploit, sendToServer, sendToFan, startPatch, approve, reject, reset }),
+    [mode, phase, hardware, target, agents, scanSource, activeRepo, scanError, findings, ranking, scanStartedAt, authorAgents, exploitStage, serverBreach, fanBreach, patchAgent, reviewAgent, approved, verifyResult, startScan, startExploit, sendToServer, sendToFan, startPatch, approve, reject, reset],
   );
 }
 

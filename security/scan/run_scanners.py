@@ -74,7 +74,10 @@ def _run_json_cli(cmd: list[str], *, timeout: float = 120.0) -> dict[str, Any] |
     """Run a CLI that prints JSON to stdout and return the parsed object, or
     None if the tool isn't installed / the target dir doesn't exist yet."""
     try:
-        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+        # encoding+errors are load-bearing on Windows: semgrep emits UTF-8 bytes
+        # that the default cp1252 locale codec cannot decode, which kills the
+        # stdout reader thread and makes the scan hang to its full timeout.
+        proc = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=timeout)
     except FileNotFoundError:
         print(f"[run_scanners] {cmd[0]} not found on PATH — skipping", file=sys.stderr)
         return None
@@ -159,6 +162,102 @@ def run_bandit(device_service_dir: Path = DEVICE_SERVICE_DIR) -> list[ScannerFin
                 "scanner": "bandit",
                 "cveRef": "",
                 "file": _rel(r.get("filename", "")),
+                "line": int(r.get("line_number", 0)),
+                "severity": str(r.get("issue_severity", "")).upper() or "LOW",
+                "ruleId": str(r.get("test_id", "")),
+                "message": " ".join(str(r.get("issue_text", "")).split())[:200],
+                "claudeVerdict": "",
+                "isTheRealOne": False,
+                "createdAt": int(time.time() * 1000),
+            }
+        )
+    return findings
+
+
+def _rel_to(path: str, root: Path) -> str:
+    """Path relative to a GIVEN root (e.g. a cloned-repo root), not REPO_ROOT.
+    Falls back to the raw path if it cannot be made relative."""
+    if not path:
+        return path
+    try:
+        return Path(path).resolve().relative_to(root.resolve()).as_posix()
+    except (ValueError, OSError):
+        return path
+
+
+def run_semgrep_generic(target_dir: Path) -> list[ScannerFinding]:
+    """Scan an ARBITRARY repo with Semgrep's registry rules (`--config auto`,
+    no login required; falls back to the bundled `p/default` community ruleset
+    if auto returns nothing). Unlike run_semgrep (which loads only the custom
+    CWE-306 rule for the demo device), this surfaces whatever real issues the
+    registry rules find. Reported paths are relative to `target_dir`."""
+    if not target_dir.exists():
+        return []
+
+    def _scan(config: str) -> dict[str, Any] | None:
+        return _run_json_cli(
+            [
+                "semgrep", "scan", "--config", config,
+                "--metrics", "off", "--json",
+                "--disable-version-check", "--quiet", str(target_dir),
+            ],
+            timeout=300.0,
+        )
+
+    # `p/default` is the registry's general-purpose ruleset; it runs with
+    # metrics OFF (unlike `--config auto`, which refuses when metrics are off).
+    # `p/security-audit` is a broader security pass used as a fallback.
+    result = _scan("p/default")
+    if result is None or not result.get("results"):
+        fallback = _scan("p/security-audit")
+        if fallback is not None and fallback.get("results"):
+            result = fallback
+    if result is None:
+        return []
+
+    findings: list[ScannerFinding] = []
+    for i, r in enumerate(result.get("results", [])):
+        extra = r.get("extra", {}) if isinstance(r.get("extra"), dict) else {}
+        meta = extra.get("metadata", {}) if isinstance(extra.get("metadata"), dict) else {}
+        cwe = meta.get("cwe")
+        if isinstance(cwe, list):
+            cwe = cwe[0] if cwe else ""
+        findings.append(
+            {
+                "id": i + 1,
+                "scanner": "semgrep",
+                "cveRef": "",
+                "cwe": str(cwe) if cwe else "",
+                "file": _rel_to(r.get("path", ""), target_dir),
+                "line": int(r.get("start", {}).get("line", 0)),
+                "severity": str(extra.get("severity", "")).upper() or "WARNING",
+                "ruleId": str(r.get("check_id", "")).split(".")[-1],
+                "message": " ".join(str(extra.get("message", "")).split())[:200],
+                "claudeVerdict": "",
+                "isTheRealOne": False,
+                "createdAt": int(time.time() * 1000),
+            }
+        )
+    return findings
+
+
+def run_bandit_generic(target_dir: Path) -> list[ScannerFinding]:
+    """Bandit over an arbitrary repo, with paths relative to `target_dir`
+    (run_bandit makes them relative to REPO_ROOT, which is wrong for a clone)."""
+    if not target_dir.exists():
+        return []
+    result = _run_json_cli(["bandit", "-r", str(target_dir), "-f", "json", "--exit-zero"], timeout=300.0)
+    if result is None:
+        return []
+    findings: list[ScannerFinding] = []
+    for i, r in enumerate(result.get("results", [])):
+        findings.append(
+            {
+                "id": i + 1,
+                "scanner": "bandit",
+                "cveRef": "",
+                "cwe": "",
+                "file": _rel_to(r.get("filename", ""), target_dir),
                 "line": int(r.get("line_number", 0)),
                 "severity": str(r.get("issue_severity", "")).upper() or "LOW",
                 "ruleId": str(r.get("test_id", "")),
