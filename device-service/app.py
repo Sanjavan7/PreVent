@@ -18,18 +18,13 @@ contradict true_state. That true/reported desync *is* the exploit: the fan
 stops (true_state.fan_on=False) and the patient truly crashes (true vitals
 fall) while reported vitals/alarm stay "normal" (the silence beat).
 
-A PATCHED reference implementation is included below, feature-flagged off by
-default via DEVICE_SERVICE_PATCHED. It is the behaviour the patch stage (Factory
-Droid, Dev 1) produces as a real diff; Dev 2's headless loop reaches the same
-behaviour by launching the service with DEVICE_SERVICE_PATCHED=1 so the
-deterministic verifier can prove the re-run of the byte-identical exploit fails.
-
-SemGrep note: BOTH the vulnerable and patched `device_command` definitions are
-present in this one file (guarded by the flag). SemGrep's static AST match sees
-both regardless of the flag, which is exactly what "fires on the vuln, silent on
-the patch" needs — the vulnerable one has the route decorator directly above
-`def` (fires); the patched one has `@require_token` in between and is a GET-free
-mutating route guarded by auth (silent).
+There is ONE command handler, and it is intentionally vulnerable: a single bare
+`@app.post("/device/command")` with no auth check (CWE-306, see
+rules/missing-auth.yaml). The patch stage (Factory Droid, Dev 1) closes it by
+writing a real diff that stacks an auth decorator above the route; after that
+SemGrep goes silent and the byte-identical exploit re-run fails. Patched-ness is
+therefore a property of the file bytes on disk, not an env flag — so VERIFY can
+only pass on code the patch actually wrote.
 
 Wire shapes mirror contracts/src/types.ts (DeviceStatus / DeviceCommand). The
 public JSON here uses snake_case; push_device_status() re-maps to the camelCase
@@ -38,7 +33,6 @@ contracts shape before writing the shared source-of-truth row.
 
 from __future__ import annotations
 
-import functools
 import json
 import os
 import tempfile
@@ -56,13 +50,10 @@ app = Flask(__name__)
 DEVICE_SERVICE_HOST = os.environ.get("DEVICE_SERVICE_HOST", "127.0.0.1")
 DEVICE_SERVICE_PORT = int(os.environ.get("DEVICE_SERVICE_PORT", "5000"))
 
-# The bearer token the PATCHED handler requires. The patch stage / headless
-# loop sets this in the environment when it brings up the patched service.
+# The bearer token an auth guard added by the patch stage will read. The
+# committed vulnerable handler never consults it; it exists so the patched code
+# (and the headless loop) has a secret to check against.
 DEVICE_SERVICE_TOKEN = os.environ.get("DEVICE_SERVICE_TOKEN", "")
-
-# Feature flag: default is the VULNERABLE handler (the demo needs the exploit
-# to work out of the box). "1" swaps in the patched reference path.
-DEVICE_SERVICE_PATCHED = os.environ.get("DEVICE_SERVICE_PATCHED", "0") == "1"
 
 # Where to write the single source-of-truth DeviceStatus row. In the real
 # system this is the SpacetimeDB `device_status` row (written by Dev 3's
@@ -153,28 +144,6 @@ def _recompute_compromised() -> bool:
     )
 
 
-def require_token(fn):
-    """Auth decorator for the PATCHED reference handler. The SemGrep rule in
-    rules/missing-auth.yaml treats a handler guarded by a stacked auth
-    decorator like this one as authenticated (so it does not fire on it)."""
-
-    @functools.wraps(fn)
-    def wrapper(*args: Any, **kwargs: Any):
-        auth_header = request.headers.get("Authorization", "")
-        token = auth_header.removeprefix("Bearer ").strip() if auth_header else ""
-
-        if not DEVICE_SERVICE_TOKEN:
-            # Server misconfigured (no token set) -> fail CLOSED, not open.
-            return jsonify({"error": "server not configured for auth"}), 403
-        if not token:
-            return jsonify({"error": "missing bearer token"}), 401
-        if token != DEVICE_SERVICE_TOKEN:
-            return jsonify({"error": "invalid token"}), 403
-        return fn(*args, **kwargs)
-
-    return wrapper
-
-
 def _apply_physiology(action: str, rate: Optional[int]) -> Optional[tuple[dict, int]]:
     """Apply the TRUE physical effect of a command to true_state. Returns an
     error (body, status) tuple for an unknown action, else None."""
@@ -260,9 +229,10 @@ def get_device_schema():
             "commandEndpoint": {
                 "method": "POST",
                 "path": "/device/command",
-                # Honest reflection of the running mode: the vulnerable build
-                # enforces no auth; the patched build requires a bearer token.
-                "authRequired": DEVICE_SERVICE_PATCHED,
+                # Honest reflection of the committed truth: the vulnerable
+                # handler enforces no auth. (The patch stage adds a guard and
+                # would flip this to True in its diff.)
+                "authRequired": False,
             },
             "actions": {
                 "stop_fan": "stop the ventilator fan (patient stops being ventilated)",
@@ -290,73 +260,39 @@ def get_device_reset():
 
 
 # ---------------------------------------------------------------------------
-# Command handler: vulnerable by default; DEVICE_SERVICE_PATCHED=1 swaps in the
-# patched reference handler. Both branches use the literal @app.post(...)
-# decorator form on purpose — that is exactly the shape rules/missing-auth.yaml
-# matches: `ruleid` on the vulnerable (no-auth) branch, `ok` on the patched
-# (`@require_token`) branch.
+# The one command handler: a single bare @app.post("/device/command") with no
+# auth check at all (CWE-306: Missing Authentication for Critical Function).
+# This is exactly the shape rules/missing-auth.yaml fires on; the patch stage
+# closes it by stacking an auth decorator above the route.
 # ---------------------------------------------------------------------------
-if DEVICE_SERVICE_PATCHED:
-    # PATCHED reference handler — target for the patch stage (Droid).
-    # Requires a bearer token (401/403 on missing/invalid) and IGNORES untrusted
-    # reported_overrides entirely so true/reported can never desync.
-    # ok: flask-missing-auth-decorator
-    @app.post("/device/command")
-    @require_token
-    def device_command():
-        body = request.get_json(silent=True) or {}
-        action: Optional[str] = body.get("action")
-        rate: Optional[int] = body.get("rate")
-        # reported_overrides is intentionally read-and-discarded (both key
-        # spellings): the patched device never lets a caller set its own
-        # "reported" view.
-        _ = body.get("reported_overrides") or body.get("reportedOverrides")
+# ruleid: flask-missing-auth-decorator
+@app.post("/device/command")
+def device_command():
+    body = request.get_json(silent=True) or {}
+    action: Optional[str] = body.get("action")
+    # Accept both the canonical snake_case wire key (PLAN-MASTER 2b) and the
+    # camelCase app-level key (contracts/src/types.ts DeviceCommand), so a
+    # caller using either shape still trips the lie.
+    reported_overrides: dict[str, Any] = (
+        body.get("reported_overrides") or body.get("reportedOverrides") or {}
+    )
+    rate: Optional[int] = body.get("rate")
 
-        err = _apply_physiology(action, rate)
-        if err is not None:
-            return jsonify(err[0]), err[1]
+    err = _apply_physiology(action, rate)
+    if err is not None:
+        return jsonify(err[0]), err[1]
 
-        # reported_state always mirrors true_state here — no overrides accepted —
-        # and the alarm honestly reflects a stopped fan.
-        reported_state["reported_hr"] = true_state["true_hr"]
-        reported_state["reported_spo2"] = true_state["true_spo2"]
-        reported_state["alarm_active"] = not true_state["fan_on"]
+    # THE LIE: blindly apply whatever the (unauthenticated) caller claims the
+    # reported vitals/alarm should be, unrelated to true_state.
+    if "hr" in reported_overrides:
+        reported_state["reported_hr"] = reported_overrides["hr"]
+    if "spo2" in reported_overrides:
+        reported_state["reported_spo2"] = reported_overrides["spo2"]
+    if "alarm" in reported_overrides:
+        reported_state["alarm_active"] = reported_overrides["alarm"]
 
-        _sync_and_push(action)
-        return jsonify({"ok": True, "fan_on": true_state["fan_on"]})
-
-else:
-    # VULNERABLE handler — CWE-306: Missing Authentication for Critical Function.
-    # No auth decorator / token check at all. This is the function
-    # rules/missing-auth.yaml is written to fire on.
-    # ruleid: flask-missing-auth-decorator
-    @app.post("/device/command")
-    def device_command():
-        body = request.get_json(silent=True) or {}
-        action: Optional[str] = body.get("action")
-        # Accept both the canonical snake_case wire key (PLAN-MASTER 2b) and the
-        # camelCase app-level key (contracts/src/types.ts DeviceCommand), so a
-        # caller using either shape still trips the lie.
-        reported_overrides: dict[str, Any] = (
-            body.get("reported_overrides") or body.get("reportedOverrides") or {}
-        )
-        rate: Optional[int] = body.get("rate")
-
-        err = _apply_physiology(action, rate)
-        if err is not None:
-            return jsonify(err[0]), err[1]
-
-        # THE LIE: blindly apply whatever the (unauthenticated) caller claims the
-        # reported vitals/alarm should be, unrelated to true_state.
-        if "hr" in reported_overrides:
-            reported_state["reported_hr"] = reported_overrides["hr"]
-        if "spo2" in reported_overrides:
-            reported_state["reported_spo2"] = reported_overrides["spo2"]
-        if "alarm" in reported_overrides:
-            reported_state["alarm_active"] = reported_overrides["alarm"]
-
-        _sync_and_push(action)
-        return jsonify({"ok": True, "fan_on": true_state["fan_on"]})
+    _sync_and_push(action)
+    return jsonify({"ok": True, "fan_on": true_state["fan_on"]})
 
 
 def reset_healthy() -> None:

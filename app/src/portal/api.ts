@@ -124,17 +124,42 @@ export interface DeliverResult {
   reported: Vitals;
 }
 
-export interface PatchResult {
-  applied: boolean;
-  diffRef: string;
-  droid: string;
+/** The read-only reviewer's structured verdict on Droid's patch. */
+export interface PatchReview {
+  verdict: 'approve' | 'request_changes' | 'block';
+  confidence: number;
+  closesCwe306: boolean;
+  requiresAuthNow: boolean;
+  ignoresUntrustedOverrides: boolean;
+  onlyAppPyTouched: boolean;
+  summary: string;
+  issues: { severity: 'low' | 'medium' | 'high'; file: string; line?: number; note: string }[];
 }
+
+/** The merged patch stream: Node-runner lines relayed verbatim, then the
+ *  Python-synthesized gate / verify tail. One SSE `data:` frame per event. */
+export type PatchEvent =
+  | { type: 'writer_started'; sessionId: string; model: string; usedFallback: boolean }
+  | { type: 'writer_delta'; channel: 'text' | 'thinking'; text: string }
+  | { type: 'writer_tool'; phase: 'call' | 'progress'; name: string; toolUseId?: string; detail?: string }
+  | { type: 'shield_blocked'; command: string; reason: string; ts: number }
+  | { type: 'credits'; factoryCredits?: number; inputTokens: number; outputTokens: number; thinkingTokens: number }
+  | { type: 'diff'; diff: string; files: string[]; empty: boolean }
+  | { type: 'reviewer_started'; sessionId: string; model: string; readOnly: boolean; disabledToolIds: string[] }
+  | { type: 'reviewer_delta'; channel: 'text' | 'thinking'; text: string }
+  | { type: 'review_verdict'; review: PatchReview; structured: boolean; fallbackText?: string }
+  | { type: 'awaiting_approval'; diffRef: string; verdict: PatchReview | null }
+  | { type: 'patch_applied'; approvedBy: string; ranAgainst: string }
+  | { type: 'verify_result'; statusCode: number; passed: boolean; detail: string; true: Vitals; ranAgainst: string }
+  | { type: 'patch_rejected'; reverted: string[] }
+  | { type: 'patch_done'; outcome: 'verified' | 'failed' | 'rejected' };
 
 export interface VerifyResult {
   statusCode: number;
   passed: boolean;
   detail: string;
   true: Vitals;
+  ranAgainst: string;
 }
 
 async function postJSON<T>(path: string, body: unknown, timeoutMs = 20000): Promise<T> {
@@ -184,9 +209,16 @@ export const api = {
 
   // Stage 1 — real HTTP against the running device-service (server breach).
   deliver: (command: AuthoredCommand) => postJSON<DeliverResult>('/api/deliver', { command }),
-  patch: () => postJSON<PatchResult>('/api/patch', {}),
   verify: (command: AuthoredCommand) => postJSON<VerifyResult>('/api/verify', { command }),
   restore: () => postJSON<{ ok: boolean }>('/api/restore', {}),
+
+  // Patch stage — the Glass-Box review cell. A long-lived SSE stream carries the
+  // writer/reviewer transcripts, the diff and the verdict, blocks on the human
+  // gate, then relays the apply + VERIFY (approve) or git-revert (reject) tail.
+  streamPatch: (onEvent: (e: PatchEvent) => void, onError: () => void) =>
+    streamSSE<PatchEvent>('/api/patch/stream', onEvent, onError),
+  approve: (body?: { approvedBy?: string }) => postJSON<{ ok: boolean }>('/api/approve', body ?? {}),
+  reject: () => postJSON<{ ok: boolean }>('/api/reject', {}),
 
   // Stage 2 — flash the malicious fan-off firmware to the real board (physical).
   flash: () => postJSON<FlashResult>('/api/flash', {}, 180000),

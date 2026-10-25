@@ -643,6 +643,33 @@ _SVC_TMPDIR: Path | None = None
 # stop()+spawn, so overlapping calls could orphan a child. One lock, no races.
 _SVC_LOCK = threading.Lock()
 
+# --------------------------------------------- Factory Droid patch gate ----
+#
+# The REAL remediation stage. A Node runner (Factory Droid writer + read-only
+# reviewer) produces a diff + verdict, then a HUMAN gates the deploy. The gate
+# lives here in Python (not in the runner) so it reuses the proven worker/
+# queue/generator plumbing _exploit_stream already uses and never holds the
+# Node child open across minutes of deliberation — the runner EXITS after the
+# verdict; approval drives the device restart + VERIFY, rejection git-reverts.
+AGENTS_DIR = REPO_ROOT / "agents"
+# Invoke `node` against tsx's JS entry directly (never a tsx/pnpm shim) so the
+# spawn is Windows-safe.
+TSX_CLI = AGENTS_DIR / "node_modules" / "tsx" / "dist" / "cli.mjs"
+PATCH_RUNNER = AGENTS_DIR / "src" / "factory" / "patchRunner.ts"
+_PATCH_GATE = threading.Event()  # set by /api/approve|reject; unblocks the stream
+_PATCH_DECISION: dict[str, Any] = {}  # {"approved": bool, "approvedBy": str}
+_PATCH_PENDING = threading.Event()  # set while a gate is awaited; guards the 409
+
+# The exploit command the patch-stage VERIFY re-sends byte-identical against
+# Droid's edited bytes. Captured from the most recent /api/deliver (the attack
+# the judge just watched land); defaults to the canonical stop-fan payload so
+# the inline VERIFY is well-behaved even on a cold patch run.
+_DEFAULT_EXPLOIT_COMMAND: dict[str, Any] = {
+    "action": "stop_fan",
+    "reportedOverrides": {"hr": 72, "spo2": 98, "alarm": False},
+}
+_LAST_EXPLOIT_COMMAND: dict[str, Any] = dict(_DEFAULT_EXPLOIT_COMMAND)
+
 
 def _free_device_port() -> int:
     """A free TCP port for the device-service singleton. Prefer 8071 (loop's
@@ -658,11 +685,13 @@ def _free_device_port() -> int:
         return s.getsockname()[1]
 
 
-def _device(patched: bool) -> DeviceService:
+def _device() -> DeviceService:
     """Lazily create the device-service singleton (temp row file + log dir) and
-    (re)start it in the requested mode, returning the running service.
-    DeviceService.start() stops any prior process first, so this both launches
-    the service cold and flips it between vulnerable/patched on later calls."""
+    (re)start it, returning the running service. DeviceService.start() stops any
+    prior process first, so this both launches the service cold and relaunches
+    it from the CURRENT app.py bytes on disk — the committed vulnerable handler
+    on a clean checkout, or Droid's edited bytes after an approved patch.
+    Patched-ness is a property of the file bytes, not a launch flag."""
     global _SVC, _SVC_TMPDIR
     with _SVC_LOCK:
         if _SVC is None:
@@ -672,7 +701,7 @@ def _device(patched: bool) -> DeviceService:
                 row_file=_SVC_TMPDIR / "device_row.json",
                 log_dir=_SVC_TMPDIR,
             )
-        _SVC.start(patched=patched)
+        _SVC.start()
         return _SVC
 
 
@@ -696,10 +725,15 @@ def _true_block(row: dict[str, Any]) -> dict[str, Any]:
 def api_deliver():
     """Run the device-service VULNERABLE and fire the unauthenticated payload at
     it for real, returning the true-vs-reported divergence it produced."""
+    global _LAST_EXPLOIT_COMMAND
     body = request.get_json(silent=True) or {}
     command = body.get("command") or {}
+    if command:
+        # Remember the exact bytes delivered so the patch-stage VERIFY can
+        # re-send a byte-identical exploit against Droid's edited handler.
+        _LAST_EXPLOIT_COMMAND = command
 
-    svc = _device(patched=False)
+    svc = _device()
     fetch_device_status_row(base_url=svc.base_url)  # before (observed baseline)
     result = deliver_payload(command, base_url=svc.base_url)
     after = fetch_device_status_row(base_url=svc.base_url)
@@ -738,18 +772,215 @@ def api_deliver():
     )
 
 
-@app.post("/api/patch")
-def api_patch():
-    """Deploy the patched device-service (bearer auth required, untrusted
-    reported_overrides ignored) — stands in for Factory Droid's diff."""
-    _device(patched=True)
-    return jsonify(
+def _apply_diff_idempotent(diff_text: str) -> str:
+    """Deploy the proposed patch to device-service/app.py, tolerant of BOTH the
+    live path (the writer Droid already edited the file in place) and the
+    replay/no-key path (the file is still the pristine vulnerable bytes).
+
+    Returns: "empty" (nothing to apply), "applied" (forward-applied the diff),
+    "already" (a clean reverse-check proves it is already in the tree -> no-op),
+    or "failed" (neither direction applies -> VERIFY will then honestly fail).
+
+    The diff is a plain unified diff (a/app.py b/app.py, no `diff --git`/`index`
+    headers), applied with `-p1` and `-C device-service`, matching how it was
+    produced (toApplicableDiff) and validated.
+    """
+    if not diff_text.strip():
+        return "empty"
+    dev = str(DEVICE_SERVICE_DIR)
+    with tempfile.NamedTemporaryFile(
+        "w", suffix=".diff", delete=False, encoding="utf-8", newline="\n"
+    ) as fh:
+        fh.write(diff_text if diff_text.endswith("\n") else diff_text + "\n")
+        patch_path = fh.name
+    try:
+        base = ["git", "-C", dev, "apply", "-p1"]
+        if subprocess.run(base + ["--check", patch_path], capture_output=True, text=True).returncode == 0:
+            subprocess.run(base + [patch_path], check=True, capture_output=True, text=True)
+            return "applied"
+        # Already applied (live Droid edit) -> a clean reverse-check -> no-op.
+        if subprocess.run(base + ["--reverse", "--check", patch_path], capture_output=True, text=True).returncode == 0:
+            return "already"
+        return "failed"
+    finally:
+        try:
+            os.unlink(patch_path)
+        except OSError:
+            pass
+
+
+def _patch_stream():
+    """Spawn the Node patch runner (Factory Droid writer + read-only reviewer),
+    relay each stdout JSON line verbatim as one SSE event, then SYNTHESIZE the
+    human-gate / verify / restore tail.
+
+    Modeled 1:1 on _exploit_stream: the runner runs on a worker thread that
+    pushes each parsed stdout line onto a queue; this generator drains the queue
+    and yields one SSE event per line IMMEDIATELY (flush per event). The runner
+    EXITS after emitting its reviewer verdict; we then announce awaiting_approval
+    and BLOCK on _PATCH_GATE until a human clicks approve/reject (POST
+    /api/approve|reject, serviced on another thread because app.run is
+    threaded=True). On approve we relaunch the device on Droid's edited bytes and
+    run VERIFY inline; on reject we git-revert the device-service source."""
+    _PATCH_GATE.clear()
+    _PATCH_PENDING.clear()
+    _PATCH_DECISION.clear()
+
+    # Windows-safe spawn: `node` against tsx's JS entry, with AGENTS_DIR as cwd
+    # so the workspace tsconfig / node_modules resolve. The runner reads
+    # FACTORY_API_KEY itself (via its own `import '../env'`); we inject nothing.
+    proc = subprocess.Popen(
+        ["node", str(TSX_CLI), str(PATCH_RUNNER), str(DEVICE_SERVICE_DIR)],
+        cwd=str(AGENTS_DIR),
+        env={**os.environ, "PYTHONUNBUFFERED": "1"},
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        bufsize=1,
+    )
+
+    # Bridge the runner's stdout lines to this generator via a thread-safe
+    # queue: the runner's pipe is drained on a worker thread; we emit as lines
+    # arrive. Non-JSON lines (tsx diagnostics on the merged stream) are skipped.
+    q: "queue.Queue[tuple[str, Any]]" = queue.Queue()
+
+    def _worker(_proc=proc, _q=q):
+        try:
+            for line in _proc.stdout:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    obj = json.loads(line)
+                except (ValueError, TypeError):
+                    continue  # tsx/node diagnostics -> not an event line
+                _q.put(("event", obj))
+        finally:
+            _q.put(("done", None))
+
+    worker = threading.Thread(target=_worker, daemon=True)
+    worker.start()
+
+    verdict: Any = None
+    diff_text: str = ""
+    while True:
+        kind, obj = q.get()
+        if kind == "done":
+            break
+        # Track the reviewer verdict so the gate card can show it.
+        if obj.get("type") == "review_verdict":
+            verdict = obj.get("review")
+        # Track the proposed diff so APPROVE can deploy it (idempotently).
+        elif obj.get("type") == "diff":
+            diff_text = obj.get("diff", "") or ""
+        yield _sse(obj)
+
+    worker.join()
+    try:
+        if proc.stdout is not None:
+            proc.stdout.close()
+    except OSError:
+        pass
+    proc.wait()
+
+    # --- Human gate: announce, then block until approve/reject --------------
+    _PATCH_PENDING.set()
+    yield _sse(
         {
-            "applied": True,
-            "diffRef": "device-service/app.py (+bearer auth, −trust overrides)",
-            "droid": "factory-7f3a1c",
+            "type": "awaiting_approval",
+            "diffRef": "device-service/app.py",
+            "verdict": verdict,
         }
     )
+    # Keep-alive comments every ~15s while blocked so proxies/dev-servers don't
+    # drop the idle connection. _PATCH_GATE.wait() returns True once a human
+    # clicks (sets it); until then it times out and we emit a ping.
+    while not _PATCH_GATE.wait(timeout=15):
+        yield ": ping\n\n"
+
+    _PATCH_PENDING.clear()
+    approved = bool(_PATCH_DECISION.get("approved"))
+    app_py = str(DEVICE_SERVICE_DIR / "app.py")
+
+    if approved:
+        # Deploy = apply the proposed diff to the on-disk app.py (idempotent),
+        # then relaunch the service on those bytes and re-run the exact exploit.
+        # Live: Droid already edited app.py -> forward apply is a no-op (reverse
+        # check matches). Replay/no-key: app.py is pristine vulnerable -> this
+        # applies the cached guard. Either way VERIFY runs against the SAME bytes
+        # the dashboard showed in the diff — the green check is a property of the
+        # deployed bytes, never an env flag.
+        _apply_diff_idempotent(diff_text)
+        svc = _device()
+        yield _sse(
+            {
+                "type": "patch_applied",
+                "approvedBy": _PATCH_DECISION.get("approvedBy", "judge"),
+                "ranAgainst": app_py,
+            }
+        )
+        command = _LAST_EXPLOIT_COMMAND or _DEFAULT_EXPLOIT_COMMAND
+        v_before = fetch_device_status_row(base_url=svc.base_url)
+        outcome = verify_patch(command, base_url=svc.base_url, status_before=v_before)
+        after = fetch_device_status_row(base_url=svc.base_url)
+        yield _sse(
+            {
+                "type": "verify_result",
+                "statusCode": outcome["statusCode"],
+                "passed": outcome["passed"],
+                "detail": outcome["detail"],
+                "true": _true_block(after),
+                "ranAgainst": app_py,
+            }
+        )
+        yield _sse(
+            {"type": "patch_done", "outcome": "verified" if outcome["passed"] else "failed"}
+        )
+    else:
+        # Rejected: git-revert the device-service source back to the committed
+        # vulnerable bytes (after a Droid edit the on-disk file is no longer
+        # vulnerable), scoped to device-service paths only.
+        from restore import git_revert_device_service
+
+        result = git_revert_device_service(repo_root=REPO_ROOT)
+        yield _sse(
+            {"type": "patch_rejected", "reverted": result.get("reverted", [])}
+        )
+        yield _sse({"type": "patch_done", "outcome": "rejected"})
+
+
+@app.get("/api/patch/stream")
+def patch_stream():
+    resp = Response(_patch_stream(), mimetype="text/event-stream")
+    # Same anti-buffering headers as the scan/exploit streams so each beat (and
+    # the keep-alive pings during the gate) reach the UI as they happen.
+    resp.headers["Cache-Control"] = "no-cache"
+    resp.headers["X-Accel-Buffering"] = "no"
+    return resp
+
+
+@app.post("/api/approve")
+def api_approve():
+    """Approve & deploy the pending patch. 409 when no gate is open (the
+    one-outstanding-approval invariant)."""
+    if not _PATCH_PENDING.is_set():
+        return jsonify({"ok": False, "error": "no pending approval"}), 409
+    body = request.get_json(silent=True) or {}
+    _PATCH_DECISION.update(
+        {"approved": True, "approvedBy": body.get("approvedBy", "dashboard")}
+    )
+    _PATCH_GATE.set()
+    return jsonify({"ok": True})
+
+
+@app.post("/api/reject")
+def api_reject():
+    """Reject the pending patch (git-revert). 409 when no gate is open."""
+    if not _PATCH_PENDING.is_set():
+        return jsonify({"ok": False, "error": "no pending approval"}), 409
+    _PATCH_DECISION.update({"approved": False})
+    _PATCH_GATE.set()
+    return jsonify({"ok": True})
 
 
 @app.post("/api/verify")
@@ -759,9 +990,10 @@ def api_verify():
     body = request.get_json(silent=True) or {}
     command = body.get("command") or {}
 
-    # verify runs against the patched service /api/patch left running; if nothing
-    # is up yet, bring it up patched so the endpoint is still well-behaved.
-    svc = _SVC if _SVC is not None else _device(patched=True)
+    # verify runs against the service the patch stage left running (Droid's
+    # edited bytes); if nothing is up yet, bring it up from the current on-disk
+    # bytes so the endpoint is still well-behaved.
+    svc = _SVC if _SVC is not None else _device()
     v_before = fetch_device_status_row(base_url=svc.base_url)
     outcome = verify_patch(command, base_url=svc.base_url, status_before=v_before)
     after = fetch_device_status_row(base_url=svc.base_url)
@@ -772,6 +1004,8 @@ def api_verify():
             "passed": outcome["passed"],
             "detail": outcome["detail"],
             "true": _true_block(after),
+            # The honesty line: the actual file the exploit was re-run against.
+            "ranAgainst": str(DEVICE_SERVICE_DIR / "app.py"),
         }
     )
 
@@ -779,8 +1013,13 @@ def api_verify():
 @app.post("/api/restore")
 def api_restore():
     """Flip back to the clean, pre-patch VULNERABLE service and reset it to the
-    healthy baseline (device-service exposes GET /device/_reset)."""
-    svc = _device(patched=False)
+    healthy baseline. After a Droid edit the on-disk app.py is no longer
+    vulnerable, so git-revert the device-service source FIRST (scoped checkout),
+    then relaunch from the committed vulnerable bytes and reset the row."""
+    from restore import git_revert_device_service
+
+    git_revert_device_service(repo_root=REPO_ROOT)
+    svc = _device()  # now the committed vulnerable bytes
     try:
         requests.get(f"{svc.base_url}/device/_reset", timeout=5.0)
     except requests.RequestException:
