@@ -4,11 +4,11 @@
 
 import type { RankItem, ScanFinding } from '../api';
 
-function sevTone(sev: string): string {
+function sevPill(sev: string): string {
   const s = sev.toUpperCase();
-  if (s === 'ERROR' || s === 'HIGH') return 'text-danger-fg';
-  if (s === 'MEDIUM' || s === 'WARNING') return 'text-warn-fg';
-  return 'text-text-muted';
+  if (s === 'ERROR' || s === 'HIGH') return 'border border-danger-border bg-danger-bg text-danger-fg';
+  if (s === 'MEDIUM' || s === 'WARNING') return 'border border-warn/40 bg-warn-bg text-warn-fg';
+  return 'border border-border bg-surface-2 text-text-muted';
 }
 
 interface Props {
@@ -30,7 +30,7 @@ export function FindingsList({ findings, ranking, selectedId, onSelect, scanning
   return (
     <section className="panel flex min-h-0 flex-col overflow-hidden">
       <header className="flex items-center justify-between px-3.5 py-2.5">
-        <span className="text-sm font-medium text-text-secondary">Findings</span>
+        <span className="font-display text-lg font-normal text-text">Findings</span>
         <span className="font-mono text-meta text-text-muted">
           {ranking.length ? `${exploitable} exploitable of ${findings.length}` : scanning ? 'scanning…' : `${findings.length}`}
         </span>
@@ -54,12 +54,12 @@ export function FindingsList({ findings, ranking, selectedId, onSelect, scanning
                     onClick={() => onSelect(f)}
                     className={`press flex w-full gap-3 border-t border-border px-3.5 py-2.5 text-left state-transition ${selected ? 'bg-surface-2' : 'hover:bg-surface-2'} ${real ? 'border-l-2 border-l-danger' : 'border-l-2 border-l-transparent'}`}
                   >
-                    <span className="mt-px w-4 shrink-0 font-mono text-sm font-semibold tabular-nums text-text-secondary">
+                    <span className={`mt-px w-4 shrink-0 font-mono text-sm font-semibold tabular-nums ${rankItem && rank === 1 && real ? 'text-accent' : 'text-text-secondary'}`}>
                       {rankItem ? rank : '·'}
                     </span>
                     <span className="min-w-0 flex-1">
-                      <span className="flex items-baseline gap-2">
-                        <span className={`text-meta font-medium ${sevTone(f.severity)}`}>{f.severity.toLowerCase()}</span>
+                      <span className="flex flex-wrap items-center gap-2">
+                        <span className={`rounded-pill px-2 py-0.5 text-overline uppercase ${sevPill(f.severity)}`}>{f.severity.toLowerCase()}</span>
                         {rankItem && <span className="font-mono text-meta text-text-secondary">CVSS {rankItem.cvss}</span>}
                         <span className={`text-meta ${real ? 'text-danger-fg' : 'text-text-muted'}`}>
                           {real ? 'exploitable' : 'decoy'}

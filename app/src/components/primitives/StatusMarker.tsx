@@ -26,17 +26,17 @@ export function StatusMarker({ status }: { status: ActivityStatus }) {
   }
 
   if (status === 'done') {
-    // neutral gray check on surface-2 — no green on "done".
+    // green check chip — "the fix holds" (brand story: green = verified/safe).
     return (
       <span
         aria-hidden
         className="flex h-[18px] w-[18px] items-center justify-center rounded-full"
-        style={{ background: 'var(--color-surface-2)' }}
+        style={{ background: 'var(--color-success-bg)' }}
       >
         <svg width="10" height="10" viewBox="0 0 10 10" fill="none">
           <path
             d="M2 5.2 L4.2 7.4 L8 3"
-            stroke="#BFBFBF"
+            stroke="var(--color-success)"
             strokeWidth="1.6"
             strokeLinecap="round"
             strokeLinejoin="round"
@@ -61,7 +61,7 @@ export function StatusMarker({ status }: { status: ActivityStatus }) {
     <span
       aria-hidden
       className="block h-2.5 w-2.5 rounded-full border"
-      style={{ borderColor: 'rgba(255,255,255,0.18)' }}
+      style={{ borderColor: 'var(--color-border-strong)' }}
     />
   );
 }
