@@ -37,6 +37,7 @@ import { ROOM_LAYOUT } from './ward/layout';
 import { Ward } from './ward/Ward';
 import { WardInteractions } from './ward/WardInteractions';
 import { People } from './ward/People';
+import { NetworkAttack } from './network/NetworkAttack';
 import { CameraRig } from './CameraRig';
 
 interface Props {
@@ -128,6 +129,12 @@ export const Scene = memo(function Scene({ getDevice, reducedMotion }: Props) {
 
       {/* The strolling crowd (2 InstancedMesh, its own useFrame). */}
       <People layout={ROOM_LAYOUT} reducedMotion={reducedMotion} tier={tier} />
+
+      {/* The network kill-chain overlay (external attacker → service hub → the
+          patient's device). Mounted OUTSIDE <Bounds> in raw world coords so it
+          shares the ward space without enlarging the auto-fit bbox. Owns its own
+          single useFrame; reads the live row via the same stable getDevice(). */}
+      <NetworkAttack getDevice={getDevice} reducedMotion={reducedMotion} />
 
       {/* The minimal bright post stack (Stage 1). */}
       <Effects tier={tier} bloomRef={refs.bloom} chromaRef={refs.chroma} />
