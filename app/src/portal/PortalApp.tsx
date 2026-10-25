@@ -1,6 +1,7 @@
-// PreVent — the security console. Real hardware -> real scan -> ranked findings
-// that open the vulnerable code -> spawn one DeepSeek author agent per
-// exploitable finding, shown as a clickable spatial graph.
+// PreVent — the security console. Real hardware → real scan → ranked findings
+// that open the vulnerable code → a TWO-STAGE attack shown as a clickable graph:
+// DeepSeek curates the server exploit (live reasoning) → breach the server over
+// HTTP → curate the fan exploit → flash the real board. Click any agent to watch.
 
 import { useCallback, useEffect, useState } from 'react';
 import type { ScanFinding } from './api';
@@ -13,34 +14,37 @@ import { AgentGraph } from './exploit/AgentGraph';
 import { AgentDetail } from './exploit/AgentDetail';
 import { buildGraph } from './exploit/graphModel';
 
+const STAGE_WORD: Record<string, string> = {
+  curating_server: 'curating server exploit',
+  server_ready: 'server exploit ready',
+  breaching_server: 'breaching server',
+  server_breached: 'server breached',
+  curating_fan: 'curating fan exploit',
+  fan_ready: 'fan exploit ready',
+  flashing_fan: 'flashing the board',
+  fan_breached: 'fan stopped',
+};
+
 export function PortalApp() {
   const pipeline = usePipeline();
-  const { mode, phase, hardware, agents, findings, ranking, authorAgents, attack, startScan, startExploit, approveAndPatch, reset } = pipeline;
+  const { mode, phase, hardware, agents, findings, ranking, authorAgents, exploitStage, serverBreach, fanBreach, startScan, startExploit, sendToServer, sendToFan, reset } = pipeline;
 
   const [selected, setSelected] = useState<ScanFinding | null>(null);
   const [selectedNode, setSelectedNode] = useState<string | null>(null);
 
-  // Let the detail panel follow the key beats as the attack unfolds.
-  useEffect(() => {
-    if (attack.device === 'compromised') setSelectedNode('device');
-    else if (attack.phase === 'awaiting_approval') setSelectedNode('factory');
-    else if (attack.phase === 'verified') setSelectedNode('verify');
-  }, [attack.device, attack.phase]);
-
-  // Open the top-ranked finding automatically once ranking lands.
   useEffect(() => {
     if (selected || findings.length === 0) return;
     const top = ranking.length ? findings.find((f) => f.id === ranking[0].findingId) : findings[0];
     if (top) setSelected(top);
   }, [findings, ranking, selected]);
 
-  // On entering the exploit phase, select the first author node by default.
+  // Follow the two-stage attack beats.
   useEffect(() => {
-    if (phase !== 'exploit') return;
-    if (selectedNode) return;
-    const first = buildGraph(authorAgents, attack).nodes.find((n) => n.kind === 'author');
-    setSelectedNode(first?.id ?? 'deepseek');
-  }, [phase, authorAgents, attack, selectedNode]);
+    if (exploitStage === 'curating_server') setSelectedNode('author-server');
+    else if (exploitStage === 'server_breached') setSelectedNode('server');
+    else if (exploitStage === 'curating_fan') setSelectedNode('author-fan');
+    else if (exploitStage === 'fan_breached') setSelectedNode('fan');
+  }, [exploitStage]);
 
   const onReset = useCallback(() => {
     setSelected(null);
@@ -51,23 +55,21 @@ export function PortalApp() {
   const working = phase !== 'connect' && phase !== 'ready';
   const statusWord =
     mode === 'connecting' ? 'connecting'
-      : phase === 'scanning' ? 'scanning'
-        : phase === 'review' ? 'review'
-          : phase === 'exploit' ? 'exploiting'
+      : phase === 'exploit' ? (STAGE_WORD[exploitStage] ?? 'exploiting')
+        : phase === 'scanning' ? 'scanning'
+          : phase === 'review' ? 'review'
             : hardware.connected ? 'ready' : 'waiting';
 
-  const selNode = buildGraph(authorAgents, attack).nodes.find((n) => n.id === selectedNode) ?? null;
+  const selNode = buildGraph(authorAgents, exploitStage, serverBreach, fanBreach).nodes.find((n) => n.id === selectedNode) ?? null;
+  const live = exploitStage === 'curating_server' || exploitStage === 'curating_fan' || exploitStage === 'breaching_server' || exploitStage === 'flashing_fan';
 
   return (
     <div className="flex h-full flex-col bg-bg text-text">
-      {/* ---- top bar ---- */}
       <header className="flex items-center justify-between gap-4 px-5 py-3">
         <div className="flex items-center gap-4">
-          <span className="text-lg font-bold tracking-tight">
-            Pre<span className="text-success">Vent</span>
-          </span>
+          <span className="text-lg font-bold tracking-tight">Pre<span className="text-success">Vent</span></span>
           <span className="flex items-center gap-2">
-            <span className={`gem ${hardware.connected ? 'text-success' : 'text-text-muted'} ${phase === 'scanning' || phase === 'exploit' ? 'gem--live text-accent' : ''}`} style={{ width: 7, height: 7 }} />
+            <span className={`gem ${hardware.connected ? 'text-success' : 'text-text-muted'} ${phase === 'scanning' || live ? 'gem--live text-accent' : ''}`} style={{ width: 7, height: 7 }} />
             <span className="text-meta text-text-secondary">{statusWord}</span>
           </span>
           {hardware.connected && (
@@ -78,9 +80,14 @@ export function PortalApp() {
         </div>
 
         <div className="flex items-center gap-2">
-          {attack.phase === 'awaiting_approval' && (
-            <button type="button" onClick={approveAndPatch} className="press state-transition glow-amber rounded-md bg-warn-bg px-3 py-1.5 text-sm font-medium text-warn-fg hover:bg-surface-3">
-              Approve &amp; deploy patch
+          {exploitStage === 'server_ready' && (
+            <button type="button" onClick={sendToServer} className="press state-transition rounded-md bg-accent-bg px-3 py-1.5 text-sm font-medium text-accent-fg hover:bg-surface-3">
+              Send to server
+            </button>
+          )}
+          {exploitStage === 'fan_ready' && (
+            <button type="button" onClick={sendToFan} className="press state-transition glow-red rounded-md bg-danger-bg px-3 py-1.5 text-sm font-medium text-danger-fg hover:bg-surface-3">
+              Send to fan — flash board
             </button>
           )}
           {phase === 'review' && (
@@ -101,13 +108,12 @@ export function PortalApp() {
         </div>
       </header>
 
-      {/* ---- body ---- */}
       {!working ? (
         <ConnectScreen pipeline={pipeline} onStart={startScan} />
       ) : phase === 'exploit' ? (
-        <main className="grid min-h-0 flex-1 grid-cols-1 gap-3 px-3 pb-3 lg:grid-cols-[minmax(0,1.7fr)_minmax(320px,1fr)]">
-          <AgentGraph authors={authorAgents} attack={attack} selectedId={selectedNode} onSelect={setSelectedNode} />
-          <AgentDetail node={selNode} findings={findings} attack={attack} />
+        <main className="grid min-h-0 flex-1 grid-cols-1 gap-3 px-3 pb-3 lg:grid-cols-[minmax(0,1.7fr)_minmax(340px,1fr)]">
+          <AgentGraph authors={authorAgents} stage={exploitStage} serverBreach={serverBreach} fanBreach={fanBreach} selectedId={selectedNode} onSelect={setSelectedNode} />
+          <AgentDetail node={selNode} findings={findings} serverBreach={serverBreach} fanBreach={fanBreach} />
         </main>
       ) : (
         <main className="flex min-h-0 flex-1 flex-col gap-3 px-3 pb-3">
@@ -118,9 +124,7 @@ export function PortalApp() {
               <CodeViewer finding={selected} />
             ) : (
               <section className="panel grid-field flex min-h-0 flex-1 items-center justify-center">
-                <p className="text-sm text-text-muted">
-                  {phase === 'scanning' ? 'Findings open here as the agents report.' : 'Select a finding to view the vulnerable code.'}
-                </p>
+                <p className="text-sm text-text-muted">{phase === 'scanning' ? 'Findings open here as the agents report.' : 'Select a finding to view the vulnerable code.'}</p>
               </section>
             )}
           </div>

