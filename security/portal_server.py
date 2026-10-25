@@ -806,22 +806,31 @@ BEDSIDE_SKETCH_DIR = REPO_ROOT / "calhacks2026" / "arduino" / "bedside"
 # Per-step ceiling (compile and upload each get their own ~120s budget).
 _FLASH_TIMEOUT_S = 120.0
 
-# The malicious fan-off sketch body. Uses the teammate's pin map (motor enable
-# 5, IN1 7, IN2 8, red LED A1): hold the motor driver at zero duty and the red
-# LED high forever, regardless of any sensor. The \\" sequences write literal \"
-# into the .ino so the Serial frame is valid C++.
+# The malicious fan-off sketch body. Pin map: motor enable 5, IN1 7, IN2 8,
+# GREEN LED A1, RED LED D2, buzzer D13. It holds the motor at zero duty forever,
+# kills the green "healthy" LED, drives the red LED (dimmed via a 250 Hz soft-PWM
+# window since A1/D2 aren't PWM pins on the R4), and sounds a short ~120 ms beep
+# each second. The \\" sequences write literal \" into the .ino so the Serial
+# frame is valid C++.
 _FANOFF_SKETCH = (
     "#define PIN_MOTOR_EN 5\n"
     "#define PIN_MOTOR_IN1 7\n"
     "#define PIN_MOTOR_IN2 8\n"
-    "#define PIN_LED_RED A1\n"
+    "#define PIN_LED_GREEN A1\n"
+    "#define PIN_LED_RED 2\n"
+    "#define PIN_BUZZER 13\n"
+    "unsigned long _tx=0;\n"
     "void setup(){pinMode(PIN_MOTOR_EN,OUTPUT);pinMode(PIN_MOTOR_IN1,OUTPUT);"
-    "pinMode(PIN_MOTOR_IN2,OUTPUT);pinMode(PIN_LED_RED,OUTPUT);"
+    "pinMode(PIN_MOTOR_IN2,OUTPUT);pinMode(PIN_LED_GREEN,OUTPUT);"
+    "pinMode(PIN_LED_RED,OUTPUT);pinMode(PIN_BUZZER,OUTPUT);"
     "digitalWrite(PIN_MOTOR_IN1,LOW);digitalWrite(PIN_MOTOR_IN2,LOW);"
-    "analogWrite(PIN_MOTOR_EN,0);digitalWrite(PIN_LED_RED,HIGH);"
+    "analogWrite(PIN_MOTOR_EN,0);digitalWrite(PIN_LED_GREEN,LOW);"
     "Serial.begin(115200);}\n"
-    "void loop(){analogWrite(PIN_MOTOR_EN,0);digitalWrite(PIN_LED_RED,HIGH);"
-    "Serial.println(\"{\\\"compromised\\\":1,\\\"fan\\\":0}\");delay(500);}\n"
+    "void loop(){analogWrite(PIN_MOTOR_EN,0);digitalWrite(PIN_LED_GREEN,LOW);"
+    "digitalWrite(PIN_LED_RED,(micros()%4000UL)<2000UL?HIGH:LOW);"
+    "digitalWrite(PIN_BUZZER,(millis()%1000UL)<120UL?HIGH:LOW);"
+    "if(millis()-_tx>=500){_tx=millis();"
+    "Serial.println(\"{\\\"compromised\\\":1,\\\"fan\\\":0}\");}}\n"
 )
 
 
