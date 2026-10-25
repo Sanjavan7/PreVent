@@ -1,14 +1,19 @@
 // The portal orchestrator. Polls for the plugged-in device, streams the REAL
-// scan, then runs the attack as TWO visible stages: DeepSeek curates the SERVER
-// exploit (streaming its reasoning) → breach the server over real HTTP → then
-// curates the FAN exploit → flash the malicious fan-off firmware to the real
-// board. Falls back to an honest simulation (same story, streamed) if the
+// scan, then runs the attack as N PARALLEL DeepSeek conversations — ONE per
+// scanner finding, all streaming at once over a single multiplexed SSE. Each
+// conversation reaches its own verdict (exploitable or not) and, when
+// exploitable, an authored payload. The user then picks ONE exploitable finding
+// + a route (breach the server over real HTTP, or flash the malicious fan-off
+// firmware to the real board), then drives the Factory patch → approval → verify
+// remediation. Falls back to an honest simulation (same story, streamed) if the
 // control service isn't reachable.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from './api';
 import type { AuthoredCommand, DeliverResult, FlashResult, Hardware, PatchReview, RankItem, ScanFinding, Target, VerifyResult } from './api';
-import { SIM_AGENT_MS, SIM_AUTHORED, SIM_FINDINGS, SIM_RANKING, SIM_TARGET } from './fixtures';
+import { SIM_AGENT_MS, SIM_EXPLOIT_SCRIPTS, SIM_FINDINGS, SIM_RANKING, SIM_TARGET } from './fixtures';
+
+export type ExploitRoute = 'server' | 'fan';
 
 export type Phase = 'connect' | 'ready' | 'scanning' | 'review' | 'exploit';
 export type Mode = 'connecting' | 'live' | 'sim';
@@ -35,23 +40,27 @@ const AGENT_SPEC: Omit<ScanAgent, 'state' | 'startedAt' | 'durationMs' | 'findin
 const freshAgents = (): ScanAgent[] =>
   AGENT_SPEC.map((a) => ({ ...a, state: 'idle', startedAt: null, durationMs: null, findingCount: 0 }));
 
-/** A DeepSeek exploit-author agent — one per exploitable finding. Its `transcript`
- *  accumulates the model's streamed reasoning so judges watch it curate live. */
+/** A DeepSeek exploit-author agent — ONE per scanner finding, keyed by
+ *  findingId. All N run in parallel; each `transcript` accumulates its own
+ *  streamed turns/deltas so judges watch every conversation curate live. The
+ *  model decides `verdict.exploitable`; an exploitable one also carries the
+ *  authored `command` + impact + patient/patch risk. */
 export interface AuthorAgent {
-  id: string;
+  id: string; // graph node id — `author/<findingId>`
   findingId: number;
   target: string;
   file: string;
   model: string;
-  state: AgentState; // 'running' = authoring
+  state: AgentState; // 'running' = the conversation is streaming
   startedAt: number | null;
   durationMs: number | null;
-  command: AuthoredCommand | null;
-  rationale: string;
+  transcript: string; // streamed turns + deltas
+  verdict: { exploitable: boolean; rationale: string } | null;
+  command: AuthoredCommand | null; // present iff exploitable
   impact: string;
+  patientRisk: string;
+  patchRisk: string;
   source: string;
-  transcript: string; // streamed reasoning
-  prompt: { system: string; user: string } | null;
 }
 
 /** A single command the Droid Shield denied while the writer ran. */
@@ -84,18 +93,16 @@ export interface ReviewAgent {
   structured: boolean;
 }
 
-/** The attack runs as two sequential, visible stages, then the remediation
- *  (patch → review → human gate → verify) extends the same exploit timeline. */
+/** The exploit timeline. N author conversations stream in parallel during
+ *  `curating`; once they all finish (`ready`) the user picks ONE exploitable
+ *  finding + a route and runs it (`breaching` → `breached`); then the Factory
+ *  remediation (patch → review → human gate → verify) extends the same line. */
 export type ExploitStage =
   | 'idle'
-  | 'curating_server'
-  | 'server_ready'
-  | 'breaching_server'
-  | 'server_breached'
-  | 'curating_fan'
-  | 'fan_ready'
-  | 'flashing_fan'
-  | 'fan_breached'
+  | 'curating' // all N conversations streaming in parallel
+  | 'ready' // every conversation done; user picks an exploit + route
+  | 'breaching' // running the chosen route (deliver / flash)
+  | 'breached' // the chosen route landed
   | 'patching'
   | 'reviewing'
   | 'awaiting_approval'
@@ -176,19 +183,6 @@ const SIM_VERIFY = (): VerifyResult => ({
   ranAgainst: 'device-service/app.py',
 });
 
-function simReasoning(a: AuthorAgent): string {
-  const sim = SIM_AUTHORED[a.file];
-  const cmd = JSON.stringify(sim?.command ?? { action: 'stop_fan' });
-  return (
-    `## Reasoning\n` +
-    `1. Flaw: ${a.target} exposes a state-changing control path with no authentication guard (CWE-306).\n` +
-    `2. Abuse: a single unauthenticated request can both stop the ventilator fan and spoof the reported vitals/alarm.\n` +
-    `3. ${sim?.rationale ?? 'The handler accepts the command outright.'}\n` +
-    `4. Impact: ${sim?.impact ?? 'the fan stops while the monitor keeps reading healthy.'}\n\n` +
-    `Payload:\n\`\`\`json\n${cmd}\n\`\`\`\n`
-  );
-}
-
 export interface Pipeline {
   mode: Mode;
   phase: Phase;
@@ -203,6 +197,11 @@ export interface Pipeline {
   scanStartedAt: number | null;
   authorAgents: AuthorAgent[];
   exploitStage: ExploitStage;
+  /** The exploitable finding the user picked to run, and the route it runs by. */
+  chosenFindingId: number | null;
+  chosenRoute: ExploitRoute | null;
+  /** The DeepSeek finding node the Factory patch nodes hang off (parentFindingId). */
+  patchParentFindingId: number | null;
   serverBreach: DeliverResult | null;
   fanBreach: FlashResult | null;
   patchAgent: WriterAgent | null;
@@ -211,8 +210,9 @@ export interface Pipeline {
   verifyResult: VerifyResult | null;
   startScan: (repo?: { owner: string; name: string }) => void;
   startExploit: () => void;
-  sendToServer: () => void;
-  sendToFan: () => void;
+  chooseFinding: (findingId: number) => void;
+  chooseRoute: (route: ExploitRoute) => void;
+  runExploit: () => void;
   startPatch: () => void;
   approve: () => void;
   reject: () => void;
@@ -233,6 +233,9 @@ export function usePipeline(): Pipeline {
   const [scanStartedAt, setScanStartedAt] = useState<number | null>(null);
   const [authorAgents, setAuthorAgents] = useState<AuthorAgent[]>([]);
   const [exploitStage, setExploitStage] = useState<ExploitStage>('idle');
+  const [chosenFindingId, setChosenFindingId] = useState<number | null>(null);
+  const [chosenRoute, setChosenRoute] = useState<ExploitRoute | null>(null);
+  const [patchParentFindingId, setPatchParentFindingId] = useState<number | null>(null);
   const [serverBreach, setServerBreach] = useState<DeliverResult | null>(null);
   const [fanBreach, setFanBreach] = useState<FlashResult | null>(null);
   const [patchAgent, setPatchAgent] = useState<WriterAgent | null>(null);
@@ -241,8 +244,8 @@ export function usePipeline(): Pipeline {
   const [verifyResult, setVerifyResult] = useState<VerifyResult | null>(null);
 
   const authoredRef = useRef<Record<number, AuthoredCommand>>({});
-  const serverFindingRef = useRef<number | null>(null);
-  const fanFindingRef = useRef<number | null>(null);
+  const chosenFindingRef = useRef<number | null>(null);
+  const chosenRouteRef = useRef<ExploitRoute | null>(null);
   const timers = useRef<ReturnType<typeof setTimeout>[]>([]);
   const closeStream = useRef<(() => void) | null>(null);
   const patchStreamClose = useRef<(() => void) | null>(null);
@@ -442,93 +445,137 @@ export function usePipeline(): Pipeline {
     else runScanSim();
   }, [clearTimers, runScanLive, runScanSim, runRepoScanLive, hardware.connected]);
 
-  // ---- exploit: curate one author (streaming), live or simulated ----
-  const curateSim = useCallback(
-    (findingId: number, onDone: () => void) => {
-      const agent = buildOne(findings, ranking, findingId);
-      const text = simReasoning(agent);
-      const sim = SIM_AUTHORED[agent.file];
-      const command = sim?.command ?? { action: 'stop_fan' };
-      patchAuthor(findingId, { state: 'running', startedAt: Date.now() });
-      // Stream the reasoning in chunks so judges watch it curate (realistic pace).
-      const chunk = 10;
-      const stepMs = 55;
-      let i = 0;
-      const total = 300 + Math.ceil(text.length / chunk) * stepMs;
-      for (let pos = 0; pos < text.length; pos += chunk) {
-        const slice = text.slice(pos, pos + chunk);
-        timers.current.push(setTimeout(() => appendTranscript(findingId, slice), 300 + i * stepMs));
-        i += 1;
+  // ---- exploit: N parallel DeepSeek conversations (one per finding) ----
+  // Offline fallback: replay the scripted conversations from fixtures, all
+  // overlapping, each paced over ~10-20s with its own turns, verdict + payload.
+  const curateAllSim = useCallback(
+    (onAllDone: () => void) => {
+      const ids = new Set(findings.map((f) => f.id));
+      const scripts = SIM_EXPLOIT_SCRIPTS.filter((s) => ids.has(s.findingId));
+      if (scripts.length === 0) {
+        onAllDone();
+        return;
       }
-      timers.current.push(
-        setTimeout(() => {
-          authoredRef.current[findingId] = command;
-          patchAuthor(findingId, {
-            state: 'done', durationMs: total, command, source: 'pre_cached_fallback', model: 'DeepSeek-V4.1-Flash',
-            rationale: sim?.rationale ?? '', impact: sim?.impact ?? '',
-          });
-          onDone();
-        }, total),
+      // Reset the seeded agents so a fallback after a live blip starts clean.
+      setAuthorAgents((prev) =>
+        prev.map((a) => ({ ...a, state: 'idle', startedAt: null, durationMs: null, transcript: '', verdict: null, command: null, impact: '', patientRisk: '', patchRisk: '', source: '' })),
       );
+
+      const chunk = 9;
+      let latestEnd = 0;
+      scripts.forEach((s, si) => {
+        const fid = s.findingId;
+        const start = 180 + si * 160; // slight stagger — the fan of conversations overlaps
+        // Flatten the turns into paced emissions: a turn marker, then the body in chunks.
+        const emissions: string[] = [];
+        s.turns.forEach((turn, ti) => {
+          emissions.push(`\n\n— DeepSeek turn ${ti + 1} —\n`);
+          for (let pos = 0; pos < turn.length; pos += chunk) emissions.push(turn.slice(pos, pos + chunk));
+        });
+        const stepMs = Math.max(28, Math.round(s.durationMs / Math.max(1, emissions.length)));
+        timers.current.push(setTimeout(() => patchAuthor(fid, { state: 'running', startedAt: Date.now(), model: s.model }), start));
+        emissions.forEach((slice, i) => {
+          timers.current.push(setTimeout(() => appendTranscript(fid, slice), start + 120 + i * stepMs));
+        });
+        const end = start + 120 + emissions.length * stepMs + 120;
+        latestEnd = Math.max(latestEnd, end);
+        timers.current.push(
+          setTimeout(() => {
+            patchAuthor(fid, { verdict: { exploitable: s.exploitable, rationale: s.rationale } });
+            if (s.exploitable && s.command) {
+              authoredRef.current[fid] = s.command;
+              patchAuthor(fid, { command: s.command, impact: s.impact ?? '', patientRisk: s.patientRisk ?? '', patchRisk: s.patchRisk ?? '' });
+            }
+            patchAuthor(fid, { state: 'done', durationMs: end - start, source: 'pre_cached_fallback', model: s.model });
+          }, end),
+        );
+      });
+      timers.current.push(setTimeout(onAllDone, latestEnd + 300));
     },
-    [appendTranscript, findings, patchAuthor, ranking],
+    [appendTranscript, findings, patchAuthor],
   );
 
-  const curate = useCallback(
-    (findingId: number, onDone: () => void) => {
+  // Live: open ONE multiplexed stream for ALL findings at once and route each
+  // frame to its agent by findingId. Falls back to the scripted sim on error.
+  const curateAll = useCallback(
+    (onAllDone: () => void) => {
       if (modeRef.current !== 'live') {
-        curateSim(findingId, onDone);
+        curateAllSim(onAllDone);
         return;
       }
       closeStream.current = api.streamExploit(
         (e) => {
-          if (e.type === 'author_started') patchAuthor(e.findingId, { state: 'running', startedAt: Date.now(), model: e.model, prompt: e.prompt });
-          else if (e.type === 'author_delta') appendTranscript(e.findingId, e.text);
-          else if (e.type === 'author_finished') {
-            authoredRef.current[e.findingId] = e.command;
-            patchAuthor(e.findingId, { state: 'done', durationMs: e.durationMs, command: e.command, rationale: e.rationale, impact: e.impact, source: e.source, model: e.model });
-          } else if (e.type === 'authors_done') {
-            closeStream.current?.();
-            closeStream.current = null;
-            onDone();
+          switch (e.type) {
+            case 'agent_spawned':
+              patchAuthor(e.findingId, { state: 'running', startedAt: Date.now(), model: e.model, file: e.file, target: e.target });
+              break;
+            case 'turn':
+            case 'delta':
+              appendTranscript(e.findingId, e.text);
+              break;
+            case 'verdict':
+              patchAuthor(e.findingId, { verdict: { exploitable: e.exploitable, rationale: e.rationale } });
+              break;
+            case 'payload':
+              authoredRef.current[e.findingId] = e.command;
+              patchAuthor(e.findingId, { command: e.command, impact: e.impact, patientRisk: e.patientRisk, patchRisk: e.patchRisk });
+              break;
+            case 'agent_done':
+              patchAuthor(e.findingId, { state: 'done', durationMs: e.durationMs, source: e.source });
+              break;
+            case 'all_done':
+              closeStream.current?.();
+              closeStream.current = null;
+              onAllDone();
+              break;
           }
         },
-        () => curateSim(findingId, onDone),
-        findingId,
+        () => curateAllSim(onAllDone),
       );
     },
-    [appendTranscript, curateSim, patchAuthor],
+    [appendTranscript, curateAllSim, patchAuthor],
   );
 
-  // ---- stage 1: server, stage 2: fan ----
-  const curateFan = useCallback(() => {
-    const fid = fanFindingRef.current;
+  // ---- pick an exploitable finding + a route, then run the chosen breach ----
+  const chooseFinding = useCallback(
+    (findingId: number) => {
+      chosenFindingRef.current = findingId;
+      setChosenFindingId(findingId);
+      // Default the route from the finding's surface; the user can still override.
+      const a = authorAgents.find((x) => x.findingId === findingId);
+      const route: ExploitRoute = a?.target === 'firmware' ? 'fan' : 'server';
+      chosenRouteRef.current = route;
+      setChosenRoute(route);
+    },
+    [authorAgents],
+  );
+
+  const chooseRoute = useCallback((route: ExploitRoute) => {
+    chosenRouteRef.current = route;
+    setChosenRoute(route);
+  }, []);
+
+  const runExploit = useCallback(() => {
+    const fid = chosenFindingRef.current;
     if (fid == null) return;
-    setExploitStage('curating_fan');
-    curate(fid, () => setExploitStage('fan_ready'));
-  }, [curate]);
-
-  const sendToServer = useCallback(() => {
-    const fid = serverFindingRef.current;
-    const cmd = (fid != null && authoredRef.current[fid]) || { action: 'stop_fan', reportedOverrides: { hr: 72, spo2: 98, alarm: false } };
-    setExploitStage('breaching_server');
-    const done = (res: DeliverResult) => {
-      setServerBreach(res);
-      setExploitStage('server_breached');
-      timers.current.push(setTimeout(curateFan, 900)); // then curate the fan exploit
-    };
-    if (modeRef.current === 'live') api.deliver(cmd).then(done).catch(() => done(SIM_DELIVER()));
-    else timers.current.push(setTimeout(() => done(SIM_DELIVER()), 1200));
-  }, [curateFan]);
-
-  const sendToFan = useCallback(() => {
-    setExploitStage('flashing_fan');
-    const done = (res: FlashResult) => {
-      setFanBreach(res);
-      setExploitStage('fan_breached');
-    };
-    if (modeRef.current === 'live') api.flash().then(done).catch(() => done({ ...SIM_FLASH(), ok: false, error: 'flash failed' }));
-    else timers.current.push(setTimeout(() => done(SIM_FLASH()), 4200));
+    const route = chosenRouteRef.current ?? 'server';
+    setExploitStage('breaching');
+    if (route === 'fan') {
+      const done = (res: FlashResult) => {
+        setFanBreach(res);
+        setExploitStage('breached');
+      };
+      if (modeRef.current === 'live') api.flash().then(done).catch(() => done({ ...SIM_FLASH(), ok: false, error: 'flash failed' }));
+      else timers.current.push(setTimeout(() => done(SIM_FLASH()), 4200));
+    } else {
+      const cmd = authoredRef.current[fid] ?? { action: 'stop_fan', reportedOverrides: { hr: 72, spo2: 98, alarm: false } };
+      const done = (res: DeliverResult) => {
+        setServerBreach(res);
+        setExploitStage('breached');
+      };
+      if (modeRef.current === 'live') api.deliver(cmd).then(done).catch(() => done(SIM_DELIVER()));
+      else timers.current.push(setTimeout(() => done(SIM_DELIVER()), 1200));
+    }
   }, []);
 
   // ---- patch / review cell: Droid writes the fix, the reviewer audits it, the
@@ -536,6 +583,8 @@ export function usePipeline(): Pipeline {
   const runPatchSim = useCallback(() => {
     patchSimRef.current = true;
     const t = timers.current;
+    // The Factory nodes hang off the finding the user chose to exploit.
+    setPatchParentFindingId(chosenFindingRef.current);
     setExploitStage('patching');
     setPatchAgent({
       state: 'running', model: 'Factory Droid', usedFallback: true,
@@ -593,6 +642,9 @@ export function usePipeline(): Pipeline {
       (e) => {
         switch (e.type) {
           case 'writer_started':
+            // The backend tags every patch frame with the DeepSeek finding node
+            // the Factory nodes attach to (the exploitable server CWE-306).
+            setPatchParentFindingId(e.parentFindingId ?? chosenFindingRef.current);
             setExploitStage('patching');
             setPatchAgent({
               state: 'running', model: e.model, usedFallback: e.usedFallback,
@@ -676,20 +728,36 @@ export function usePipeline(): Pipeline {
     clearTimers();
     authoredRef.current = {};
     patchSimRef.current = false;
+    chosenFindingRef.current = null;
+    chosenRouteRef.current = null;
+    setChosenFindingId(null);
+    setChosenRoute(null);
+    setPatchParentFindingId(null);
     setServerBreach(null);
     setFanBreach(null);
     setPatchAgent(null);
     setReviewAgent(null);
     setApproved(false);
     setVerifyResult(null);
-    const built = buildAuthors(findings, ranking);
-    serverFindingRef.current = built.find((a) => a.target === 'device-service')?.findingId ?? built[0]?.findingId ?? null;
-    fanFindingRef.current = built.find((a) => a.target === 'firmware')?.findingId ?? built[1]?.findingId ?? null;
-    setAuthorAgents(built);
+    // ONE author agent per scanner finding — all stream in parallel.
+    setAuthorAgents(buildAuthors(findings));
     setPhase('exploit');
-    setExploitStage('curating_server');
-    if (serverFindingRef.current != null) curate(serverFindingRef.current, () => setExploitStage('server_ready'));
-  }, [clearTimers, curate, findings, ranking]);
+    setExploitStage('curating');
+    curateAll(() => setExploitStage('ready'));
+  }, [clearTimers, curateAll, findings]);
+
+  // When every conversation is done, default the pick to the top exploitable
+  // finding (ranked order) + its natural route, so the run control is live.
+  useEffect(() => {
+    if (exploitStage !== 'ready' || chosenFindingRef.current != null) return;
+    const pick = authorAgents.find((a) => a.verdict?.exploitable) ?? authorAgents.find((a) => a.command);
+    if (!pick) return;
+    chosenFindingRef.current = pick.findingId;
+    setChosenFindingId(pick.findingId);
+    const route: ExploitRoute = pick.target === 'firmware' ? 'fan' : 'server';
+    chosenRouteRef.current = route;
+    setChosenRoute(route);
+  }, [exploitStage, authorAgents]);
 
   const reset = useCallback(() => {
     clearTimers();
@@ -697,8 +765,8 @@ export function usePipeline(): Pipeline {
     patchStreamClose.current = null;
     patchSimRef.current = false;
     authoredRef.current = {};
-    serverFindingRef.current = null;
-    fanFindingRef.current = null;
+    chosenFindingRef.current = null;
+    chosenRouteRef.current = null;
     setAgents(freshAgents());
     setScanSource('device');
     setActiveRepo(null);
@@ -708,6 +776,9 @@ export function usePipeline(): Pipeline {
     setScanStartedAt(null);
     setAuthorAgents([]);
     setExploitStage('idle');
+    setChosenFindingId(null);
+    setChosenRoute(null);
+    setPatchParentFindingId(null);
     setServerBreach(null);
     setFanBreach(null);
     setPatchAgent(null);
@@ -720,24 +791,31 @@ export function usePipeline(): Pipeline {
   useEffect(() => () => clearTimers(), [clearTimers]);
 
   return useMemo(
-    () => ({ mode, phase, hardware, target, agents, scanSource, activeRepo, scanError, findings, ranking, scanStartedAt, authorAgents, exploitStage, serverBreach, fanBreach, patchAgent, reviewAgent, approved, verifyResult, startScan, startExploit, sendToServer, sendToFan, startPatch, approve, reject, reset }),
-    [mode, phase, hardware, target, agents, scanSource, activeRepo, scanError, findings, ranking, scanStartedAt, authorAgents, exploitStage, serverBreach, fanBreach, patchAgent, reviewAgent, approved, verifyResult, startScan, startExploit, sendToServer, sendToFan, startPatch, approve, reject, reset],
+    () => ({ mode, phase, hardware, target, agents, scanSource, activeRepo, scanError, findings, ranking, scanStartedAt, authorAgents, exploitStage, chosenFindingId, chosenRoute, patchParentFindingId, serverBreach, fanBreach, patchAgent, reviewAgent, approved, verifyResult, startScan, startExploit, chooseFinding, chooseRoute, runExploit, startPatch, approve, reject, reset }),
+    [mode, phase, hardware, target, agents, scanSource, activeRepo, scanError, findings, ranking, scanStartedAt, authorAgents, exploitStage, chosenFindingId, chosenRoute, patchParentFindingId, serverBreach, fanBreach, patchAgent, reviewAgent, approved, verifyResult, startScan, startExploit, chooseFinding, chooseRoute, runExploit, startPatch, approve, reject, reset],
   );
 }
 
 // ---- helpers (pure) ----
-function buildOne(findings: ScanFinding[], _ranking: RankItem[], findingId: number): AuthorAgent {
-  const f = findings.find((ff) => ff.id === findingId);
-  const target = f?.target ?? 'device';
-  return {
-    id: `author/${target}`, findingId, target, file: f?.file ?? '',
-    model: 'DeepSeek-V4.1-Flash', state: 'idle', startedAt: null, durationMs: null,
-    command: null, rationale: '', impact: '', source: '', transcript: '', prompt: null,
-  };
-}
-
-function buildAuthors(findings: ScanFinding[], ranking: RankItem[]): AuthorAgent[] {
-  const real = ranking.filter((r) => r.real);
-  const ids = real.length ? real.map((r) => r.findingId) : findings.filter((f) => f.scanner === 'semgrep').map((f) => f.id);
-  return ids.map((id) => buildOne(findings, ranking, id));
+// ONE author agent per scanner finding (keyed by findingId). The DeepSeek
+// conversation decides exploitable-or-not; the fields fill in as the stream
+// (live or simulated) arrives.
+function buildAuthors(findings: ScanFinding[]): AuthorAgent[] {
+  return findings.map((f) => ({
+    id: `author/${f.id}`,
+    findingId: f.id,
+    target: f.target ?? 'device',
+    file: f.file ?? '',
+    model: 'DeepSeek-V4.1-Flash',
+    state: 'idle',
+    startedAt: null,
+    durationMs: null,
+    transcript: '',
+    verdict: null,
+    command: null,
+    impact: '',
+    patientRisk: '',
+    patchRisk: '',
+    source: '',
+  }));
 }

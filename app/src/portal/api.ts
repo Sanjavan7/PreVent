@@ -80,11 +80,19 @@ export interface AuthoredCommand {
   reportedOverrides?: { hr?: number; spo2?: number; alarm?: boolean };
 }
 
+// The parallel exploit stream: the server opens ONE DeepSeek conversation per
+// scanner finding and multiplexes their live turns over a SINGLE SSE stream,
+// every frame tagged by `findingId`. Per finding the beats are:
+//   agent_spawned → (turn | delta)* → verdict → payload? → agent_done
+// and a terminal `all_done` fires once every conversation has ended.
 export type ExploitEvent =
-  | { type: 'author_started'; agentId: string; findingId: number; target: string; file: string; model: string; ts: number; prompt: { system: string; user: string } }
-  | { type: 'author_delta'; agentId: string; findingId: number; text: string }
-  | { type: 'author_finished'; agentId: string; findingId: number; target: string; durationMs: number; model: string; source: string; command: AuthoredCommand; impact: string; rationale: string; fullText: string }
-  | { type: 'authors_done'; count: number };
+  | { type: 'agent_spawned'; findingId: number; model: string; file: string; target: string }
+  | { type: 'turn'; findingId: number; role: 'deepseek'; text: string }
+  | { type: 'delta'; findingId: number; role: 'deepseek'; text: string }
+  | { type: 'verdict'; findingId: number; exploitable: boolean; rationale: string }
+  | { type: 'payload'; findingId: number; command: AuthoredCommand; impact: string; patientRisk: string; patchRisk: string }
+  | { type: 'agent_done'; findingId: number; durationMs: number; source: string }
+  | { type: 'all_done'; count: number };
 
 export interface FlashResult {
   ok: boolean;
@@ -138,22 +146,24 @@ export interface PatchReview {
 }
 
 /** The merged patch stream: Node-runner lines relayed verbatim, then the
- *  Python-synthesized gate / verify tail. One SSE `data:` frame per event. */
+ *  Python-synthesized gate / verify tail. One SSE `data:` frame per event.
+ *  Every frame now carries `parentFindingId` — the DeepSeek finding node the
+ *  Factory patch nodes hang off (null when no exploitable server finding). */
 export type PatchEvent =
-  | { type: 'writer_started'; sessionId: string; model: string; usedFallback: boolean }
-  | { type: 'writer_delta'; channel: 'text' | 'thinking'; text: string }
-  | { type: 'writer_tool'; phase: 'call' | 'progress'; name: string; toolUseId?: string; detail?: string }
-  | { type: 'shield_blocked'; command: string; reason: string; ts: number }
-  | { type: 'credits'; factoryCredits?: number; inputTokens: number; outputTokens: number; thinkingTokens: number }
-  | { type: 'diff'; diff: string; files: string[]; empty: boolean }
-  | { type: 'reviewer_started'; sessionId: string; model: string; readOnly: boolean; disabledToolIds: string[] }
-  | { type: 'reviewer_delta'; channel: 'text' | 'thinking'; text: string }
-  | { type: 'review_verdict'; review: PatchReview; structured: boolean; fallbackText?: string }
-  | { type: 'awaiting_approval'; diffRef: string; verdict: PatchReview | null }
-  | { type: 'patch_applied'; approvedBy: string; ranAgainst: string }
-  | { type: 'verify_result'; statusCode: number; passed: boolean; detail: string; true: Vitals; ranAgainst: string }
-  | { type: 'patch_rejected'; reverted: string[] }
-  | { type: 'patch_done'; outcome: 'verified' | 'failed' | 'rejected' };
+  | { type: 'writer_started'; parentFindingId: number | null; sessionId: string; model: string; usedFallback: boolean }
+  | { type: 'writer_delta'; parentFindingId: number | null; channel: 'text' | 'thinking'; text: string }
+  | { type: 'writer_tool'; parentFindingId: number | null; phase: 'call' | 'progress'; name: string; toolUseId?: string; detail?: string }
+  | { type: 'shield_blocked'; parentFindingId: number | null; command: string; reason: string; ts: number }
+  | { type: 'credits'; parentFindingId: number | null; factoryCredits?: number; inputTokens: number; outputTokens: number; thinkingTokens: number }
+  | { type: 'diff'; parentFindingId: number | null; diff: string; files: string[]; empty: boolean }
+  | { type: 'reviewer_started'; parentFindingId: number | null; sessionId: string; model: string; readOnly: boolean; disabledToolIds: string[] }
+  | { type: 'reviewer_delta'; parentFindingId: number | null; channel: 'text' | 'thinking'; text: string }
+  | { type: 'review_verdict'; parentFindingId: number | null; review: PatchReview; structured: boolean; fallbackText?: string }
+  | { type: 'awaiting_approval'; parentFindingId: number | null; diffRef: string; verdict: PatchReview | null }
+  | { type: 'patch_applied'; parentFindingId: number | null; approvedBy: string; ranAgainst: string }
+  | { type: 'verify_result'; parentFindingId: number | null; statusCode: number; passed: boolean; detail: string; true: Vitals; ranAgainst: string }
+  | { type: 'patch_rejected'; parentFindingId: number | null; reverted: string[] }
+  | { type: 'patch_done'; parentFindingId: number | null; outcome: 'verified' | 'failed' | 'rejected' };
 
 export interface VerifyResult {
   statusCode: number;
@@ -212,8 +222,9 @@ export const api = {
   /** A source file from the active cloned repo (repo-scan mode). */
   repoFile: (path: string) => getJSON<CodeFile>(`/api/repo/file?path=${encodeURIComponent(path)}`),
 
-  /** Stream one DeepSeek exploit author's real reasoning (optionally a single
-   *  finding, so the server stage and the fan stage can run separately). */
+  /** Open ONE DeepSeek conversation per scanner finding, ALL IN PARALLEL, and
+   *  stream their live turns over a single multiplexed SSE (tagged by findingId).
+   *  Streams every finding by default; `?finding=<id>` narrows to just one. */
   streamExploit: (onEvent: (e: ExploitEvent) => void, onError: () => void, findingId?: number) =>
     streamSSE<ExploitEvent>(`/api/exploit/stream${findingId != null ? `?finding=${findingId}` : ''}`, onEvent, onError),
 
