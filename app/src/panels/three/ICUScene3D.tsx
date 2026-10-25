@@ -73,8 +73,10 @@ function FrameInvalidator({ device }: { device: DeviceStatus }) {
 }
 
 export default function ICUScene3D({ device, fallback = null }: Props) {
-  // Probe once; a failed WebGL2 context means we never mount the Canvas.
-  const [supported] = useState(hasWebGL2);
+  // Probe once; a failed WebGL2 context means we never mount the Canvas. Also
+  // settable so a runtime context LOSS (projector hot-plug, display sleep, GPU
+  // reset) flips us back to the 2D fallback instead of a blank ward.
+  const [supported, setSupported] = useState(hasWebGL2);
   const reducedMotion = usePrefersReducedMotion();
 
   // Keep the latest device in a ref so the memoized <Scene> can read fresh
@@ -101,7 +103,15 @@ export default function ICUScene3D({ device, fallback = null }: Props) {
             powerPreference: 'high-performance',
           }}
           camera={{ position: [12, 17, 16], fov: 34, near: 0.5, far: 120 }}
-          onCreated={({ gl }) => gl.setClearColor('#EEF3F8', 1)}
+          onCreated={({ gl }) => {
+            gl.setClearColor('#EEF3F8', 1);
+            // On context loss, preventDefault() (so the browser could restore)
+            // and drop to the 2D PatientMonitor fallback rather than a blank ward.
+            gl.domElement.addEventListener('webglcontextlost', (e) => {
+              e.preventDefault();
+              setSupported(false);
+            });
+          }}
         >
           <FrameInvalidator device={device} />
           <Suspense fallback={fallback}>

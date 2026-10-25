@@ -61,6 +61,10 @@ export function useRealtimeMock(): RealtimeState {
   const timersRef = useRef<ReturnType<typeof setTimeout>[]>([]);
   // The gate's continuation while the run holds at waiting_for_human (else null).
   const approveRef = useRef<(() => void) | null>(null);
+  // Cross-tab sync channel (mock rehearsal): lets one Simulate/Approve click
+  // drive every open tab, mirroring how the LIVE shared SpacetimeDB row keeps
+  // both demo laptops in lockstep. Null where BroadcastChannel is unavailable.
+  const channelRef = useRef<BroadcastChannel | null>(null);
   // Monotonic id counters for the additive collections.
   const seqRef = useRef(0);
 
@@ -129,7 +133,15 @@ export function useRealtimeMock(): RealtimeState {
     [nextId],
   );
 
-  const approve = useCallback(() => approveRef.current?.(), []);
+  const approve = useCallback(() => {
+    approveRef.current?.();
+    // Mirror the approval to any other open tab so both laptops advance together.
+    try {
+      channelRef.current?.postMessage({ type: 'approve' });
+    } catch {
+      /* no BroadcastChannel in this environment */
+    }
+  }, []);
 
   // Register the approve bridge while this hook instance is mounted.
   useEffect(() => {
@@ -138,6 +150,34 @@ export function useRealtimeMock(): RealtimeState {
       if (activeApprove === approve) activeApprove = null;
     };
   }, [approve]);
+
+  // Cross-tab sync (mock rehearsal only): one Simulate/Approve click in any tab
+  // drives all of them, so the two-laptop demo can be rehearsed on one machine
+  // without the live SpacetimeDB row. Received messages apply the raw state
+  // setters directly (never re-broadcast), so there is no echo loop. No-op in
+  // environments without BroadcastChannel (older browsers, some webviews).
+  useEffect(() => {
+    let ch: BroadcastChannel | null = null;
+    try {
+      ch = new BroadcastChannel('prevent-mock-sync');
+      ch.onmessage = (e: MessageEvent) => {
+        const m = e.data as { type?: string; value?: boolean } | null;
+        if (m?.type === 'exploit') setMockExploitedState(!!m.value);
+        else if (m?.type === 'approve') approveRef.current?.();
+      };
+      channelRef.current = ch;
+    } catch {
+      channelRef.current = null;
+    }
+    return () => {
+      channelRef.current = null;
+      try {
+        ch?.close();
+      } catch {
+        /* ignore */
+      }
+    };
+  }, []);
 
   // ---- the scripted timeline -------------------------------------------------
 
@@ -169,13 +209,19 @@ export function useRealtimeMock(): RealtimeState {
     setAgents(
       baseAgents().map((a) => {
         if (a.stage === 'ground')
-          return { ...a, state: 'done', confidence: 1, updatedAt: Date.now() };
+          return {
+            ...a,
+            agentName: 'Claude · ground',
+            state: 'done',
+            confidence: 1,
+            updatedAt: Date.now(),
+          };
         if (a.stage === 'scan')
           return {
             ...a,
             agentName: 'Claude · scan',
             state: 'running',
-            reasoning: 'Pulling firmware + device-service source into context. ',
+            reasoning: 'Pulling the device-service source into context. ',
             confidence: 0.3,
             updatedAt: Date.now(),
           };
@@ -323,7 +369,7 @@ export function useRealtimeMock(): RealtimeState {
     schedule(7900, () => {
       streamAgent(
         'patch',
-        'Rejected my first fix — it broke the emergency override. Revising to gate only unsigned writes while preserving the resume path. ',
+        'Claude rejected its first fix — it broke the emergency override. Revising to gate only unsigned writes while preserving the resume path. ',
         { confidence: 0.76 },
       );
       log('guardrail', 'Sandbox refused the destructive call outside device-service/ scope.');
@@ -344,7 +390,9 @@ export function useRealtimeMock(): RealtimeState {
         if (fired) return;
         fired = true;
         approveRef.current = null;
-        afterApprove();
+        // Defer the tail ~600ms so the gate's gray "Deploying…" spinner actually
+        // renders before patch flips to done. Timer is tracked for teardown.
+        schedule(600, afterApprove);
       };
       approveRef.current = proceed;
       schedule(6000, proceed); // auto-advance fallback if the judge never clicks
@@ -412,10 +460,15 @@ export function useRealtimeMock(): RealtimeState {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mockExploited]);
 
-  const setMockExploited = useCallback(
-    (v: boolean) => setMockExploitedState(v),
-    [],
-  );
+  const setMockExploited = useCallback((v: boolean) => {
+    setMockExploitedState(v);
+    // Broadcast so every other open tab flips at the same instant.
+    try {
+      channelRef.current?.postMessage({ type: 'exploit', value: v });
+    } catch {
+      /* no BroadcastChannel in this environment */
+    }
+  }, []);
 
   return useMemo<RealtimeState>(
     () => ({
