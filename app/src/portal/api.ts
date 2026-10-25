@@ -68,9 +68,10 @@ export interface CodeFile {
 
 export type ScanEvent =
   | { type: 'agent_started'; agentId: string; tool: string; target: string; language: string; ts: number }
-  | { type: 'agent_finished'; agentId: string; tool: string; target: string; durationMs: number; findingCount: number; findings: ScanFinding[] }
+  | { type: 'agent_finished'; agentId: string; tool: string; target: string; language: string; durationMs: number; findingCount: number; findings: ScanFinding[] }
   | { type: 'ranking'; findings: ScanFinding[]; ranking: RankItem[]; durationMs: number }
-  | { type: 'scan_done' };
+  | { type: 'scan_done' }
+  | { type: 'scan_error'; message: string };
 
 /** A DeepSeek-authored, validated device command (the exploit payload). */
 export interface AuthoredCommand {
@@ -201,6 +202,15 @@ export const api = {
   /** Stream the real scan (one SSE message per agent event). */
   streamScan: (onEvent: (e: ScanEvent) => void, onError: () => void) =>
     streamSSE<ScanEvent>('/api/scan/stream', onEvent, onError),
+
+  /** Stream a real clone + scan of an arbitrary public GitHub repo. Same event
+   *  shape as streamScan, plus a terminal `scan_error` on failure. `repo` is
+   *  owner/name (or a full github.com URL — the server re-parses either). */
+  streamRepoScan: (repo: string, onEvent: (e: ScanEvent) => void, onError: () => void) =>
+    streamSSE<ScanEvent>(`/api/repo/scan/stream?repo=${encodeURIComponent(repo)}`, onEvent, onError),
+
+  /** A source file from the active cloned repo (repo-scan mode). */
+  repoFile: (path: string) => getJSON<CodeFile>(`/api/repo/file?path=${encodeURIComponent(path)}`),
 
   /** Stream one DeepSeek exploit author's real reasoning (optionally a single
    *  finding, so the server stage and the fan stage can run separately). */

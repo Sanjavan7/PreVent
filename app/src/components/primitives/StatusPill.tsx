@@ -1,5 +1,5 @@
-// Small text pill echoing the step status. Neutral by default; BLUE (accent)
-// for `needs-approval` (owner override: no amber); danger for `error`.
+// Small text pill echoing the step status. Neutral by default; TEAL (accent)
+// for `needs-approval`; danger (coral) for `error`.
 
 import { STATUS_TOKENS, type ActivityStatus, type PillTone } from '../pipeline/status';
 
@@ -13,7 +13,7 @@ export function StatusPill({ status }: { status: ActivityStatus }) {
   const token = STATUS_TOKENS[status];
   return (
     <span
-      className={`rounded-xs border px-1.5 py-0.5 text-overline uppercase tracking-wide ${TONE[token.tone]}`}
+      className={`rounded-pill border px-2 py-0.5 text-overline uppercase tracking-wide ${TONE[token.tone]}`}
     >
       {token.label}
     </span>

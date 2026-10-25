@@ -8,10 +8,24 @@ import { api, type ScanFinding } from '../api';
 import { SIM_CODE } from '../fixtures';
 import { CODE_THEME, getHighlighter } from './highlighter';
 
+// Only the grammars the highlighter actually loads (see highlighter.ts). An
+// unknown extension falls back to 'text' (always available) so an arbitrary
+// repo's files never throw in codeToHtml.
 function langFor(path: string): string {
-  if (path.endsWith('.ino') || path.endsWith('.c') || path.endsWith('.cpp')) return 'cpp';
-  if (path.endsWith('.py')) return 'python';
-  if (path.endsWith('.yaml') || path.endsWith('.yml')) return 'yaml';
+  const p = path.toLowerCase();
+  if (p.endsWith('.ino') || p.endsWith('.c') || p.endsWith('.cpp') || p.endsWith('.h') || p.endsWith('.hpp')) return 'cpp';
+  if (p.endsWith('.py')) return 'python';
+  if (p.endsWith('.yaml') || p.endsWith('.yml')) return 'yaml';
+  if (p.endsWith('.tsx')) return 'tsx';
+  if (p.endsWith('.ts')) return 'typescript';
+  if (p.endsWith('.jsx') || p.endsWith('.js') || p.endsWith('.mjs') || p.endsWith('.cjs')) return 'javascript';
+  if (p.endsWith('.go')) return 'go';
+  if (p.endsWith('.rs')) return 'rust';
+  if (p.endsWith('.java')) return 'java';
+  if (p.endsWith('.rb')) return 'ruby';
+  if (p.endsWith('.php')) return 'php';
+  if (p.endsWith('.json')) return 'json';
+  if (p.endsWith('.sh') || p.endsWith('.bash')) return 'bash';
   return 'text';
 }
 
@@ -22,11 +36,13 @@ interface Loaded {
   excerpt: boolean;
 }
 
-async function loadCode(finding: ScanFinding): Promise<Loaded> {
+async function loadCode(finding: ScanFinding, repo: boolean): Promise<Loaded> {
+  // Frontend decides the grammar from the path (robust across arbitrary repos);
+  // the backend lang field is only the demo device's limited set.
   const lang = langFor(finding.file);
   try {
-    const f = await api.file(finding.file);
-    return { content: f.content, startLine: 1, lang: f.lang || lang, excerpt: false };
+    const f = repo ? await api.repoFile(finding.file) : await api.file(finding.file);
+    return { content: f.content, startLine: 1, lang, excerpt: false };
   } catch {
     const ex = SIM_CODE[finding.file];
     if (ex) return { content: ex.content, startLine: ex.startLine, lang, excerpt: true };
@@ -34,7 +50,7 @@ async function loadCode(finding: ScanFinding): Promise<Loaded> {
   }
 }
 
-export function CodeViewer({ finding }: { finding: ScanFinding }) {
+export function CodeViewer({ finding, repo = false }: { finding: ScanFinding; repo?: boolean }) {
   const [html, setHtml] = useState('');
   const [meta, setMeta] = useState<Loaded | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -42,7 +58,7 @@ export function CodeViewer({ finding }: { finding: ScanFinding }) {
   useEffect(() => {
     let alive = true;
     setHtml('');
-    void loadCode(finding).then(async (loaded) => {
+    void loadCode(finding, repo).then(async (loaded) => {
       if (!alive) return;
       setMeta(loaded);
       const vulnRel = finding.line - loaded.startLine + 1;
@@ -65,7 +81,7 @@ export function CodeViewer({ finding }: { finding: ScanFinding }) {
     return () => {
       alive = false;
     };
-  }, [finding]);
+  }, [finding, repo]);
 
   // Scroll the marked line into view once rendered.
   useEffect(() => {
@@ -80,13 +96,17 @@ export function CodeViewer({ finding }: { finding: ScanFinding }) {
     <section className="panel flex min-h-0 flex-1 flex-col overflow-hidden">
       <header className="flex items-start justify-between gap-3 px-4 py-3">
         <div className="min-w-0">
-          <div className="flex items-center gap-2">
-            <span className={`text-sm font-medium ${real ? 'text-danger-fg' : 'text-text-secondary'}`}>
+          <div className="flex flex-wrap items-center gap-2">
+            <span className={`rounded-pill px-2 py-0.5 text-overline uppercase ${real ? 'border border-danger-border bg-danger-bg text-danger-fg' : 'border border-border bg-surface-2 text-text-secondary'}`}>
               {finding.cwe ?? finding.ruleId}
             </span>
-            {finding.cveRef && <span className="font-mono text-meta text-accent-fg">{finding.cveRef}</span>}
+            {finding.cveRef && (
+              <span className="rounded-pill border border-accent-border bg-accent-bg px-2 py-0.5 font-mono text-overline text-accent-fg">
+                {finding.cveRef}
+              </span>
+            )}
           </div>
-          <p className="mt-1 max-w-prose text-sm leading-snug text-text-secondary">{finding.message}</p>
+          <p className="mt-1.5 max-w-prose text-sm leading-snug text-text-secondary">{finding.message}</p>
         </div>
         <span className="shrink-0 font-mono text-meta text-text-muted">
           {finding.file}:{finding.line}

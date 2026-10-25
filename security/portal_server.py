@@ -29,6 +29,8 @@ import atexit
 import json
 import os
 import queue
+import re
+import shutil
 import socket
 import subprocess
 import sys
@@ -56,7 +58,9 @@ from scan.run_scanners import (  # noqa: E402
     SEMGREP_RULES_DIR,
     _SCAN_FLEET,
     run_bandit,
+    run_bandit_generic,
     run_semgrep,
+    run_semgrep_generic,
 )
 
 # The REAL exploit-author stage, imported by package path exactly as loop.py
@@ -228,6 +232,9 @@ def _detect_arduino(stdout: str) -> dict[str, Any]:
 def hardware():
     """Detect a plugged-in Arduino via `arduino-cli board list`. Never 500s:
     a missing/erroring CLI just reports 'not connected'. Cached ~1.5s."""
+    if os.environ.get("PREVENT_FAKE_HW") == "1":
+        # Dev/test only: report a demo board so the flow proceeds without USB.
+        return jsonify({"connected": True, "board": "Arduino Uno (demo)", "port": "COM-DEMO", "fqbn": "arduino:avr:uno"})
     now = time.monotonic()
     if _HW_CACHE["value"] is not None and now - _HW_CACHE["ts"] < _HW_TTL_S:
         return jsonify(_HW_CACHE["value"])
@@ -449,6 +456,216 @@ def scan_stream():
     resp = Response(_scan_stream(), mimetype="text/event-stream")
     # Keep proxies/dev-servers from buffering the stream so each agent beat
     # reaches the UI as it happens.
+    resp.headers["Cache-Control"] = "no-cache"
+    resp.headers["X-Accel-Buffering"] = "no"
+    return resp
+
+
+# ------------------------------------------------------- repo scan/SSE ----
+# "Real scan, any repo": clone a PUBLIC GitHub repo and run the REAL scanners
+# over it, streaming the SAME event shape as /api/scan/stream so the review UI
+# is unchanged. Static analysis only — semgrep/bandit never execute the cloned
+# code; we clone shallow, scan, and delete. This path stops at ranked findings;
+# the hardware exploit/patch/verify loop stays bound to the demo device repo.
+
+_REPO_NAME_RE = re.compile(r"^[A-Za-z0-9._-]+$")
+_CLONE_ROOT = Path(tempfile.gettempdir()) / "prevent-repo-scan"
+_MAX_CLONE_FILES = 2000
+_MAX_CLONE_BYTES = 50 * 1024 * 1024  # 50 MB working tree
+
+# The most recent cloned repo: its root (for /api/repo/file) and scan result.
+_ACTIVE_REPO: dict[str, Any] = {"root": None, "owner": None, "name": None, "findings": [], "ranking": []}
+
+_SEV_CVSS = {"CRITICAL": 9.0, "ERROR": 7.5, "HIGH": 7.5, "WARNING": 5.0, "MEDIUM": 5.0, "INFO": 2.5, "LOW": 2.5}
+
+
+def _cvss_generic(finding: dict[str, Any]) -> float:
+    """Severity-band CVSS for an arbitrary-repo finding — no filename heuristics
+    (those only make sense for the planted demo vulns)."""
+    return _SEV_CVSS.get(str(finding.get("severity", "")).upper(), 3.0)
+
+
+def _verdict_generic(finding: dict[str, Any]) -> str:
+    sev = str(finding.get("severity", "")).upper() or "INFO"
+    rule = finding.get("ruleId", "") or "rule"
+    return f"{sev} · {rule} ({finding.get('scanner', '')})"
+
+
+def rank_findings_generic(findings: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Rank arbitrary-repo findings by severity-band CVSS desc (stable by id).
+    `real` is always False: that flag drives the hardware exploit, which repo
+    mode never runs."""
+    ordered = sorted(findings, key=lambda f: (-_cvss_generic(f), f.get("id", 0)))
+    return [
+        {
+            "rank": i + 1,
+            "findingId": f.get("id"),
+            "cvss": _cvss_generic(f),
+            "real": False,
+            "verdict": _verdict_generic(f),
+        }
+        for i, f in enumerate(ordered)
+    ]
+
+
+def _parse_repo_arg(raw: str) -> tuple[str, str] | None:
+    """Accept a full https URL, a git@ SSH URL, or bare owner/repo, and return
+    (owner, name) when both are safe, shell-free identifiers; else None."""
+    raw = (raw or "").strip()
+    if not raw:
+        return None
+    m = re.search(r"github\.com[:/]+([^/]+)/([^/#?]+)", raw)
+    if m:
+        owner, name = m.group(1), m.group(2)
+    else:
+        parts = [p for p in raw.split("/") if p]
+        if len(parts) < 2:
+            return None
+        owner, name = parts[-2], parts[-1]
+    if name.endswith(".git"):
+        name = name[:-4]
+    if not (_REPO_NAME_RE.match(owner) and _REPO_NAME_RE.match(name)):
+        return None
+    return owner, name
+
+
+def _cleanup_active_clone() -> None:
+    root = _ACTIVE_REPO.get("root")
+    if root:
+        shutil.rmtree(root, ignore_errors=True)
+    _ACTIVE_REPO.update({"root": None, "owner": None, "name": None, "findings": [], "ranking": []})
+
+
+@atexit.register
+def _cleanup_clone_root() -> None:
+    shutil.rmtree(_CLONE_ROOT, ignore_errors=True)
+
+
+def _within_limits(root: Path) -> tuple[bool, str]:
+    """Reject pathologically large repos after clone (before scanning)."""
+    files = 0
+    total = 0
+    for p in root.rglob("*"):
+        if ".git" in p.parts:
+            continue
+        if p.is_file():
+            files += 1
+            try:
+                total += p.stat().st_size
+            except OSError:
+                pass
+            if files > _MAX_CLONE_FILES:
+                return False, f"repo too large (over {_MAX_CLONE_FILES} files) to scan here"
+            if total > _MAX_CLONE_BYTES:
+                return False, f"repo too large (over {_MAX_CLONE_BYTES // (1024 * 1024)} MB) to scan here"
+    return True, ""
+
+
+def _clone_repo(owner: str, name: str) -> tuple[Path | None, str | None]:
+    """Shallow-clone a public GitHub repo into a fresh temp dir. Non-interactive
+    (never prompts for credentials — a private/missing repo fails fast). Returns
+    (path, None) on success or (None, error_message)."""
+    _cleanup_active_clone()
+    _CLONE_ROOT.mkdir(parents=True, exist_ok=True)
+    dest = Path(tempfile.mkdtemp(prefix=f"{owner}-{name}-", dir=_CLONE_ROOT))
+    url = f"https://github.com/{owner}/{name}.git"
+    env = {**os.environ, "GIT_TERMINAL_PROMPT": "0", "GCM_INTERACTIVE": "never"}
+    try:
+        proc = subprocess.run(
+            ["git", "-c", "credential.helper=", "clone", "--depth", "1",
+             "--single-branch", url, str(dest)],
+            capture_output=True, text=True, timeout=90.0, env=env,
+        )
+    except subprocess.TimeoutExpired:
+        shutil.rmtree(dest, ignore_errors=True)
+        return None, "clone timed out after 90s"
+    except FileNotFoundError:
+        shutil.rmtree(dest, ignore_errors=True)
+        return None, "git is not installed on the control-plane host"
+    if proc.returncode != 0:
+        shutil.rmtree(dest, ignore_errors=True)
+        tail = [ln for ln in (proc.stderr or "").strip().splitlines() if ln.strip()]
+        low = " ".join(tail).lower()
+        # GitHub answers a missing OR private repo over https with an auth
+        # challenge; with prompts disabled that surfaces as a password error.
+        if any(k in low for k in ("password", "authentication", "could not read username", "403")):
+            return None, f"{owner}/{name} not found, or it is private (public repos only)"
+        detail = tail[-1] if tail else "clone failed"
+        return None, f"could not clone {owner}/{name} — {detail}"
+    ok, why = _within_limits(dest)
+    if not ok:
+        shutil.rmtree(dest, ignore_errors=True)
+        return None, why
+    return dest, None
+
+
+def _repo_has_python(root: Path) -> bool:
+    for p in root.rglob("*.py"):
+        if ".git" not in p.parts:
+            return True
+    return False
+
+
+def _repo_scan_stream(owner: str, name: str):
+    """Clone + scan an arbitrary repo, emitting the SAME events as _scan_stream
+    (agent_started / agent_finished / ranking / scan_done), plus a terminal
+    scan_error on a clone/validation failure."""
+    label = f"{owner}/{name}"
+    total_t0 = time.perf_counter()
+
+    yield _sse({"type": "agent_started", "agentId": f"clone/{name}", "tool": "git",
+                "target": label, "language": "clone", "ts": _now_ms()})
+    clone_t0 = time.perf_counter()
+    dest, err = _clone_repo(owner, name)
+    clone_ms = int(round((time.perf_counter() - clone_t0) * 1000))
+    if err or dest is None:
+        yield _sse({"type": "scan_error", "message": err or "clone failed"})
+        return
+    _ACTIVE_REPO.update({"root": dest, "owner": owner, "name": name, "findings": [], "ranking": []})
+    yield _sse({"type": "agent_finished", "agentId": f"clone/{name}", "tool": "git",
+                "target": label, "language": "clone", "durationMs": clone_ms,
+                "findingCount": 0, "findings": []})
+
+    fleet: list[tuple[str, str]] = [("semgrep", "multi-language")]
+    if _repo_has_python(dest):
+        fleet.append(("bandit", "python"))
+
+    all_findings: list[dict[str, Any]] = []
+    gid = 0
+    for tool, language in fleet:
+        agent_id = f"{tool}/{name}"
+        yield _sse({"type": "agent_started", "agentId": agent_id, "tool": tool,
+                    "target": label, "language": language, "ts": _now_ms()})
+        at0 = time.perf_counter()
+        found = run_semgrep_generic(dest) if tool == "semgrep" else run_bandit_generic(dest)
+        dur = int(round((time.perf_counter() - at0) * 1000))
+        for f in found:
+            gid += 1
+            f["id"] = gid
+            f["target"] = label
+        all_findings.extend(found)
+        yield _sse({"type": "agent_finished", "agentId": agent_id, "tool": tool,
+                    "target": label, "language": language, "durationMs": dur,
+                    "findingCount": len(found), "findings": found})
+
+    ranking = rank_findings_generic(all_findings)
+    _ACTIVE_REPO["findings"] = all_findings
+    _ACTIVE_REPO["ranking"] = ranking
+    total_ms = int(round((time.perf_counter() - total_t0) * 1000))
+    yield _sse({"type": "ranking", "findings": all_findings, "ranking": ranking, "durationMs": total_ms})
+    yield _sse({"type": "scan_done"})
+
+
+@app.get("/api/repo/scan/stream")
+def repo_scan_stream():
+    parsed = _parse_repo_arg(request.args.get("repo", ""))
+    if parsed is None:
+        def _bad():
+            yield _sse({"type": "scan_error",
+                        "message": "enter a GitHub repo as owner/name or a full github.com URL"})
+        return Response(_bad(), mimetype="text/event-stream")
+    owner, name = parsed
+    resp = Response(_repo_scan_stream(owner, name), mimetype="text/event-stream")
     resp.headers["Cache-Control"] = "no-cache"
     resp.headers["X-Accel-Buffering"] = "no"
     return resp
@@ -1242,6 +1459,33 @@ def file():
         {
             "path": str(resolved.relative_to(REPO_ROOT)),
             "lang": _EXT_LANG.get(resolved.suffix.lower(), "text"),
+            "content": content,
+            "lines": len(content.splitlines()),
+        }
+    )
+
+
+@app.get("/api/repo/file")
+def repo_file():
+    """Serve a source file from the active cloned repo (repo-scan mode), with a
+    strict path-escape guard. 400 if no repo is active or the path escapes."""
+    root = _ACTIVE_REPO.get("root")
+    rel_path = request.args.get("path", "")
+    if not root or not rel_path:
+        return jsonify({"error": "no active repo"}), 400
+    try:
+        base = Path(root).resolve()
+        candidate = (base / rel_path).resolve()
+        rel = candidate.relative_to(base)  # raises if it escaped the clone root
+    except (ValueError, OSError):
+        return jsonify({"error": "path not allowed"}), 400
+    if ".git" in rel.parts or not candidate.is_file():
+        return jsonify({"error": "path not allowed"}), 400
+    content = candidate.read_text(encoding="utf-8", errors="replace")
+    return jsonify(
+        {
+            "path": str(rel),
+            "lang": _EXT_LANG.get(candidate.suffix.lower(), "text"),
             "content": content,
             "lines": len(content.splitlines()),
         }
