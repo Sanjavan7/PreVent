@@ -28,6 +28,7 @@ from __future__ import annotations
 import atexit
 import json
 import os
+import queue
 import socket
 import subprocess
 import sys
@@ -64,7 +65,7 @@ from scan.run_scanners import (  # noqa: E402
 # it never raises (falls back to a deterministic validated command).
 from generate.exploit import (  # noqa: E402
     DEEPSEEK_MODEL,
-    generate_dynamic_payload,
+    stream_dynamic_payload,
 )
 
 # The REAL exploit DELIVER -> PATCH -> VERIFY tail. We reuse loop.py's
@@ -495,40 +496,100 @@ def _exploitable_findings() -> list[dict[str, Any]]:
 
 def _exploit_stream():
     """Spawn one DeepSeek exploit-author agent per exploitable finding, in rank
-    order, emitting an author_started / author_finished SSE pair per agent with
-    HONEST per-author wall-clock timing, then a final authors_done. Each agent
-    has the model AUTHOR a validated, executable DeviceCommand for a goal picked
-    by the finding's file. generate_dynamic_payload never raises — a missing or
-    declining model falls back to a deterministic validated command (its
+    order, STREAMING the model's live reasoning. For each finding we emit:
+        author_started  (with the exact prompt handed to the model)
+        author_delta     ... one per content chunk, as the model thinks ...
+        author_finished  (HONEST per-author wall-clock timing + validated command)
+    and, once all findings are authored, a final authors_done.
+
+    stream_dynamic_payload runs on a worker thread and pushes the prompt + each
+    delta onto a queue; this generator drains the queue and yields one SSE event
+    per item IMMEDIATELY (flush per delta), so the UI animates the real stream.
+    It never raises — a missing or declining model falls back to a deterministic
+    validated command whose synthesized reasoning is replayed as deltas (its
     `source` becomes 'pre_cached_fallback')."""
     findings = _exploitable_findings()
     for finding in findings:
         file = finding.get("file", "")
         target = finding.get("target", "")
+        finding_id = finding.get("id")
         goal = _goal_for(file)
         agent_id = f"author/{target}"
 
-        yield _sse(
-            {
-                "type": "author_started",
-                "agentId": agent_id,
-                "findingId": finding.get("id"),
-                "target": target,
-                "file": file,
-                "model": DEEPSEEK_MODEL,
-                "ts": _now_ms(),
-            }
-        )
+        # Bridge stream_dynamic_payload's callbacks (prompt + deltas) to this
+        # generator's yields via a thread-safe queue: the author runs on a worker
+        # thread, we drain and emit as items arrive.
+        q: "queue.Queue[tuple[str, Any]]" = queue.Queue()
+        box: dict[str, Any] = {}
+
+        def _on_prompt(prompt, _q=q):
+            _q.put(("prompt", prompt))
+
+        def _on_delta(text, _q=q):
+            _q.put(("delta", text))
+
+        def _worker(_goal=goal, _finding=finding, _q=q, _box=box):
+            try:
+                _box["result"] = stream_dynamic_payload(
+                    _goal, _finding, base_url=DEVICE_SERVICE_URL,
+                    on_delta=_on_delta, on_prompt=_on_prompt,
+                )
+            except Exception as exc:  # noqa: BLE001 -- recorded, surfaced below
+                _box["error"] = exc
+            finally:
+                _q.put(("done", None))
 
         t0 = time.perf_counter()
-        result = generate_dynamic_payload(goal, finding, base_url=DEVICE_SERVICE_URL)
+        worker = threading.Thread(target=_worker, daemon=True)
+        worker.start()
+
+        started = False
+
+        def _emit_started(prompt):
+            return _sse(
+                {
+                    "type": "author_started",
+                    "agentId": agent_id,
+                    "findingId": finding_id,
+                    "target": target,
+                    "file": file,
+                    "model": DEEPSEEK_MODEL,
+                    "ts": _now_ms(),
+                    "prompt": prompt,
+                }
+            )
+
+        while True:
+            kind, data = q.get()
+            if kind == "prompt":
+                started = True
+                yield _emit_started(data)
+            elif kind == "delta":
+                if not started:  # defensive: a delta before the prompt arrived
+                    started = True
+                    yield _emit_started({"system": "", "user": ""})
+                yield _sse(
+                    {
+                        "type": "author_delta",
+                        "agentId": agent_id,
+                        "findingId": finding_id,
+                        "text": data,
+                    }
+                )
+            else:  # "done"
+                break
+
+        worker.join()
         duration_ms = int(round((time.perf_counter() - t0) * 1000))
+        if not started:  # no prompt, no delta (shouldn't happen) -> still announce
+            yield _emit_started({"system": "", "user": ""})
+        result = box.get("result") or {}
 
         yield _sse(
             {
                 "type": "author_finished",
                 "agentId": agent_id,
-                "findingId": finding.get("id"),
+                "findingId": finding_id,
                 "target": target,
                 "durationMs": duration_ms,
                 "model": result.get("modelId"),
@@ -536,6 +597,7 @@ def _exploit_stream():
                 "command": result.get("command"),
                 "impact": result.get("impact"),
                 "rationale": result.get("rationale"),
+                "fullText": result.get("fullText"),
             }
         )
 
