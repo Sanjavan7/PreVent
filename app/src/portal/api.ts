@@ -100,6 +100,51 @@ function streamSSE<E>(path: string, onEvent: (e: E) => void, onError: () => void
   return () => es.close();
 }
 
+export interface Vitals {
+  hr: number;
+  spo2: number;
+  fanOn?: boolean;
+  alarmActive: boolean;
+}
+
+export interface DeliverResult {
+  statusCode: number;
+  compromised: boolean;
+  impact: string;
+  true: Vitals;
+  reported: Vitals;
+}
+
+export interface PatchResult {
+  applied: boolean;
+  diffRef: string;
+  droid: string;
+}
+
+export interface VerifyResult {
+  statusCode: number;
+  passed: boolean;
+  detail: string;
+  true: Vitals;
+}
+
+async function postJSON<T>(path: string, body: unknown, timeoutMs = 20000): Promise<T> {
+  const ctl = new AbortController();
+  const t = setTimeout(() => ctl.abort(), timeoutMs);
+  try {
+    const res = await fetch(`${BASE}${path}`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(body ?? {}),
+      signal: ctl.signal,
+    });
+    if (!res.ok) throw new Error(`${path} -> ${res.status}`);
+    return (await res.json()) as T;
+  } finally {
+    clearTimeout(t);
+  }
+}
+
 async function getJSON<T>(path: string, timeoutMs = 2500): Promise<T> {
   const ctl = new AbortController();
   const t = setTimeout(() => ctl.abort(), timeoutMs);
@@ -126,4 +171,10 @@ export const api = {
   /** Stream the real DeepSeek exploit-author fan-out (one agent per vuln). */
   streamExploit: (onEvent: (e: ExploitEvent) => void, onError: () => void) =>
     streamSSE<ExploitEvent>('/api/exploit/stream', onEvent, onError),
+
+  // The attack tail — real HTTP against the running device-service.
+  deliver: (command: AuthoredCommand) => postJSON<DeliverResult>('/api/deliver', { command }),
+  patch: () => postJSON<PatchResult>('/api/patch', {}),
+  verify: (command: AuthoredCommand) => postJSON<VerifyResult>('/api/verify', { command }),
+  restore: () => postJSON<{ ok: boolean }>('/api/restore', {}),
 };

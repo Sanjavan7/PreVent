@@ -25,14 +25,19 @@ Endpoints:
 
 from __future__ import annotations
 
+import atexit
 import json
 import os
+import socket
 import subprocess
 import sys
+import tempfile
+import threading
 import time
 from pathlib import Path
 from typing import Any
 
+import requests
 from flask import Flask, Response, jsonify, request
 
 SECURITY_DIR = Path(__file__).resolve().parent
@@ -61,6 +66,14 @@ from generate.exploit import (  # noqa: E402
     DEEPSEEK_MODEL,
     generate_dynamic_payload,
 )
+
+# The REAL exploit DELIVER -> PATCH -> VERIFY tail. We reuse loop.py's
+# DeviceService (launches device-service/app.py vulnerable or patched against a
+# shared row file), deliver.py's unauthenticated POST, and verify.py's
+# deterministic re-run checks — no reimplementation.
+from loop import DeviceService, _port_free  # noqa: E402
+from deliver import deliver_payload  # noqa: E402
+from verify import fetch_device_status_row, verify_patch  # noqa: E402
 
 app = Flask(__name__)
 
@@ -537,6 +550,164 @@ def exploit_stream():
     resp.headers["Cache-Control"] = "no-cache"
     resp.headers["X-Accel-Buffering"] = "no"
     return resp
+
+
+# ----------------------------------------------- exploit DELIVER/PATCH/VERIFY -
+
+# A single device-service subprocess that the DELIVER -> PATCH -> VERIFY tail
+# drives for REAL. We manage it exactly as loop.py does — one DeviceService,
+# one shared temp row file, one temp log dir — but keep it alive across requests
+# (the portal fires deliver, then patch, then verify, then restore as separate
+# HTTP calls) instead of inside one run_loop() scope.
+_SVC: DeviceService | None = None
+_SVC_TMPDIR: Path | None = None
+# Serialize (re)starts: Flask runs threaded, and DeviceService.start() does a
+# stop()+spawn, so overlapping calls could orphan a child. One lock, no races.
+_SVC_LOCK = threading.Lock()
+
+
+def _free_device_port() -> int:
+    """A free TCP port for the device-service singleton. Prefer 8071 (loop's
+    default; NOT the portal's own 8077), scanning upward if it's taken, then
+    fall back to an OS-assigned ephemeral port."""
+    for port in range(8071, 8171):
+        if port == 8077:
+            continue
+        if _port_free(port):
+            return port
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.bind(("127.0.0.1", 0))
+        return s.getsockname()[1]
+
+
+def _device(patched: bool) -> DeviceService:
+    """Lazily create the device-service singleton (temp row file + log dir) and
+    (re)start it in the requested mode, returning the running service.
+    DeviceService.start() stops any prior process first, so this both launches
+    the service cold and flips it between vulnerable/patched on later calls."""
+    global _SVC, _SVC_TMPDIR
+    with _SVC_LOCK:
+        if _SVC is None:
+            _SVC_TMPDIR = Path(tempfile.mkdtemp(prefix="prevent-portal-dev-"))
+            _SVC = DeviceService(
+                port=_free_device_port(),
+                row_file=_SVC_TMPDIR / "device_row.json",
+                log_dir=_SVC_TMPDIR,
+            )
+        _SVC.start(patched=patched)
+        return _SVC
+
+
+@atexit.register
+def _stop_device_on_exit() -> None:
+    """Never leave an orphan device-service child when the portal exits."""
+    if _SVC is not None:
+        _SVC.stop()
+
+
+def _true_block(row: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "hr": row["trueHr"],
+        "spo2": row["trueSpo2"],
+        "fanOn": row["fanOn"],
+        "alarmActive": row["alarmActive"],
+    }
+
+
+@app.post("/api/deliver")
+def api_deliver():
+    """Run the device-service VULNERABLE and fire the unauthenticated payload at
+    it for real, returning the true-vs-reported divergence it produced."""
+    body = request.get_json(silent=True) or {}
+    command = body.get("command") or {}
+
+    svc = _device(patched=False)
+    fetch_device_status_row(base_url=svc.base_url)  # before (observed baseline)
+    result = deliver_payload(command, base_url=svc.base_url)
+    after = fetch_device_status_row(base_url=svc.base_url)
+
+    status_code = result["statusCode"]
+    compromised = status_code == 200 and (
+        after["fanOn"] is False or after["reportedHr"] != after["trueHr"]
+    )
+
+    if compromised:
+        fan_txt = "fan stopped" if not after["fanOn"] else "fan running"
+        alarm_txt = "alarm silent" if not after["alarmActive"] else "alarm active"
+        impact = (
+            f"{status_code} OK — {fan_txt}; device still reports "
+            f"{after['reportedHr']}/{after['reportedSpo2']} while true vitals are "
+            f"{after['trueHr']}/{after['trueSpo2']}, {alarm_txt}."
+        )
+    else:
+        impact = (
+            f"HTTP {status_code} — no compromise (fan "
+            f"{'on' if after['fanOn'] else 'off'}, reported matches true)."
+        )
+
+    return jsonify(
+        {
+            "statusCode": status_code,
+            "compromised": bool(compromised),
+            "impact": impact,
+            "true": _true_block(after),
+            "reported": {
+                "hr": after["reportedHr"],
+                "spo2": after["reportedSpo2"],
+                "alarmActive": after["alarmActive"],
+            },
+        }
+    )
+
+
+@app.post("/api/patch")
+def api_patch():
+    """Deploy the patched device-service (bearer auth required, untrusted
+    reported_overrides ignored) — stands in for Factory Droid's diff."""
+    _device(patched=True)
+    return jsonify(
+        {
+            "applied": True,
+            "diffRef": "device-service/app.py (+bearer auth, −trust overrides)",
+            "droid": "factory-7f3a1c",
+        }
+    )
+
+
+@app.post("/api/verify")
+def api_verify():
+    """Re-send the byte-identical exploit at the PATCHED service and run the
+    deterministic checks (401/403 + true_state unchanged + no lie)."""
+    body = request.get_json(silent=True) or {}
+    command = body.get("command") or {}
+
+    # verify runs against the patched service /api/patch left running; if nothing
+    # is up yet, bring it up patched so the endpoint is still well-behaved.
+    svc = _SVC if _SVC is not None else _device(patched=True)
+    v_before = fetch_device_status_row(base_url=svc.base_url)
+    outcome = verify_patch(command, base_url=svc.base_url, status_before=v_before)
+    after = fetch_device_status_row(base_url=svc.base_url)
+
+    return jsonify(
+        {
+            "statusCode": outcome["statusCode"],
+            "passed": outcome["passed"],
+            "detail": outcome["detail"],
+            "true": _true_block(after),
+        }
+    )
+
+
+@app.post("/api/restore")
+def api_restore():
+    """Flip back to the clean, pre-patch VULNERABLE service and reset it to the
+    healthy baseline (device-service exposes GET /device/_reset)."""
+    svc = _device(patched=False)
+    try:
+        requests.get(f"{svc.base_url}/device/_reset", timeout=5.0)
+    except requests.RequestException:
+        pass  # a reset hiccup shouldn't fail the restore; restart already reset
+    return jsonify({"ok": True})
 
 
 # ------------------------------------------------------------------- file ----

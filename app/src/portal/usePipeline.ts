@@ -5,7 +5,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from './api';
-import type { AuthoredCommand, Hardware, RankItem, ScanFinding, Target } from './api';
+import type { AuthoredCommand, DeliverResult, Hardware, PatchResult, RankItem, ScanFinding, Target, VerifyResult } from './api';
 import { SIM_AGENT_MS, SIM_AUTHORED, SIM_FINDINGS, SIM_RANKING, SIM_TARGET } from './fixtures';
 
 export type Phase = 'connect' | 'ready' | 'scanning' | 'review' | 'exploit';
@@ -49,6 +49,46 @@ export interface AuthorAgent {
   source: string; // 'bitdeer' | 'featherless' | 'pre_cached_fallback'
 }
 
+export type AttackPhase =
+  | 'idle'
+  | 'delivering'
+  | 'delivered'
+  | 'patching'
+  | 'awaiting_approval'
+  | 'patched'
+  | 'verifying'
+  | 'verified';
+
+export interface AttackState {
+  phase: AttackPhase;
+  device: 'idle' | 'compromised' | 'recovered';
+  deliver: DeliverResult | null;
+  patch: PatchResult | null;
+  verify: VerifyResult | null;
+  notes: string[]; // Factory self-correct / guardrail beats
+}
+
+const freshAttack = (): AttackState => ({ phase: 'idle', device: 'idle', deliver: null, patch: null, verify: null, notes: [] });
+
+// Scripted outcomes for the offline fallback (live mode uses the real endpoints).
+const SIM_DELIVER = (): DeliverResult => ({
+  statusCode: 200, compromised: true,
+  impact: '200 OK — fan stopped; the device still reports 72/98 and the alarm stays silent.',
+  true: { hr: 38, spo2: 61, fanOn: false, alarmActive: false },
+  reported: { hr: 72, spo2: 98, alarmActive: false },
+});
+const SIM_VERIFY = (): VerifyResult => ({
+  statusCode: 401, passed: true,
+  detail: '401 Unauthorized — bearer token now required; true state unchanged.',
+  true: { hr: 72, spo2: 98, fanOn: true, alarmActive: false },
+});
+// The blue-team patch beats (narrative in both modes; the patch itself is real).
+const PATCH_NOTES = [
+  'Factory: require a bearer token on POST /device/command; ignore untrusted reportedOverrides.',
+  'Factory: rejected my first patch — it broke the emergency resume path. Revising to gate only unsigned writes.',
+  'Sandbox: blocked a write outside device-service/ scope.',
+];
+
 const DISCONNECTED: Hardware = { connected: false, board: null, port: null, fqbn: null };
 
 export interface Pipeline {
@@ -61,8 +101,10 @@ export interface Pipeline {
   ranking: RankItem[];
   scanStartedAt: number | null;
   authorAgents: AuthorAgent[];
+  attack: AttackState;
   startScan: () => void;
   startExploit: () => void;
+  approveAndPatch: () => void;
   reset: () => void;
 }
 
@@ -76,7 +118,10 @@ export function usePipeline(): Pipeline {
   const [ranking, setRanking] = useState<RankItem[]>([]);
   const [scanStartedAt, setScanStartedAt] = useState<number | null>(null);
   const [authorAgents, setAuthorAgents] = useState<AuthorAgent[]>([]);
+  const [attack, setAttack] = useState<AttackState>(freshAttack);
 
+  const authoredRef = useRef<Record<number, AuthoredCommand>>({});
+  const topFindingRef = useRef<number | null>(null);
   const timers = useRef<ReturnType<typeof setTimeout>[]>([]);
   const closeScan = useRef<(() => void) | null>(null);
   const modeRef = useRef<Mode>('connecting');
@@ -222,46 +267,109 @@ export function usePipeline(): Pipeline {
     });
   }, [ranking, findings]);
 
-  const runAuthorsSim = useCallback((agents: AuthorAgent[]) => {
-    agents.forEach((a, i) => {
-      const dur = 2400 + i * 1100;
-      timers.current.push(setTimeout(() => patchAuthor(a.findingId, { state: 'running', startedAt: Date.now() }), 300 + i * 250));
-      timers.current.push(
-        setTimeout(() => {
-          const sim = SIM_AUTHORED[a.file];
-          patchAuthor(a.findingId, {
-            state: 'done', durationMs: dur,
-            command: sim?.command ?? { action: 'stop_fan' },
-            rationale: sim?.rationale ?? 'Unauthenticated command accepted.',
-            impact: sim?.impact ?? 'Fan stopped.',
-            source: 'pre_cached_fallback', model: 'DeepSeek-V4.1-Flash',
-          });
-        }, 300 + i * 250 + dur),
-      );
-    });
-  }, [patchAuthor]);
+  const topCommand = useCallback((): AuthoredCommand => {
+    const byTop = topFindingRef.current != null ? authoredRef.current[topFindingRef.current] : undefined;
+    return byTop ?? Object.values(authoredRef.current)[0] ?? { action: 'stop_fan', reportedOverrides: { hr: 72, spo2: 98, alarm: false } };
+  }, []);
+
+  // ---- deliver -> patch gate -> verify, against the real device-service ------
+  const onVerified = useCallback((v: VerifyResult) => {
+    setAttack((a) => ({ ...a, phase: 'verified', device: 'recovered', verify: v }));
+  }, []);
+
+  const approveAndPatch = useCallback(() => {
+    setAttack((a) => ({ ...a, phase: 'patching' }));
+    const cmd = topCommand();
+    if (modeRef.current === 'live') {
+      api
+        .patch()
+        .then((p) => {
+          setAttack((a) => ({ ...a, patch: p, phase: 'verifying' }));
+          return api.verify(cmd);
+        })
+        .then(onVerified)
+        .catch(() => {
+          setAttack((a) => ({ ...a, patch: { applied: true, diffRef: 'device-service/app.py (+bearer auth, −trust overrides)', droid: 'factory-7f3a1c' }, phase: 'verifying' }));
+          timers.current.push(setTimeout(() => onVerified(SIM_VERIFY()), 1200));
+        });
+    } else {
+      timers.current.push(setTimeout(() => setAttack((a) => ({ ...a, patch: { applied: true, diffRef: 'device-service/app.py (+bearer auth, −trust overrides)', droid: 'factory-7f3a1c' }, phase: 'verifying' })), 1000));
+      timers.current.push(setTimeout(() => onVerified(SIM_VERIFY()), 2300));
+    }
+  }, [onVerified, topCommand]);
+
+  const onDelivered = useCallback((res: DeliverResult) => {
+    setAttack((a) => ({ ...a, phase: 'delivered', device: 'compromised', deliver: res }));
+    timers.current.push(setTimeout(() => setAttack((a) => ({ ...a, phase: 'patching', notes: [PATCH_NOTES[0]] })), 1000));
+    timers.current.push(setTimeout(() => setAttack((a) => ({ ...a, notes: [...a.notes, PATCH_NOTES[1]] })), 2000));
+    timers.current.push(setTimeout(() => setAttack((a) => ({ ...a, notes: [...a.notes, PATCH_NOTES[2]] })), 2800));
+    timers.current.push(setTimeout(() => setAttack((a) => ({ ...a, phase: 'awaiting_approval' })), 3500));
+  }, []);
+
+  const startDeliver = useCallback(() => {
+    setAttack((a) => ({ ...a, phase: 'delivering' }));
+    const cmd = topCommand();
+    if (modeRef.current === 'live') {
+      api.deliver(cmd).then(onDelivered).catch(() => onDelivered(SIM_DELIVER()));
+    } else {
+      timers.current.push(setTimeout(() => onDelivered(SIM_DELIVER()), 1300));
+    }
+  }, [onDelivered, topCommand]);
+
+  // ---- exploit authoring fan-out --------------------------------------------
+  const runAuthorsSim = useCallback(
+    (agents: AuthorAgent[]) => {
+      let lastEnd = 0;
+      agents.forEach((a, i) => {
+        const dur = 2400 + i * 1100;
+        const end = 300 + i * 250 + dur;
+        lastEnd = Math.max(lastEnd, end);
+        timers.current.push(setTimeout(() => patchAuthor(a.findingId, { state: 'running', startedAt: Date.now() }), 300 + i * 250));
+        timers.current.push(
+          setTimeout(() => {
+            const sim = SIM_AUTHORED[a.file];
+            const command = sim?.command ?? { action: 'stop_fan' };
+            authoredRef.current[a.findingId] = command;
+            patchAuthor(a.findingId, {
+              state: 'done', durationMs: dur, command,
+              rationale: sim?.rationale ?? 'Unauthenticated command accepted.',
+              impact: sim?.impact ?? 'Fan stopped.',
+              source: 'pre_cached_fallback', model: 'DeepSeek-V4.1-Flash',
+            });
+          }, end),
+        );
+      });
+      timers.current.push(setTimeout(() => startDeliver(), lastEnd + 500));
+    },
+    [patchAuthor, startDeliver],
+  );
 
   const runAuthorsLive = useCallback(
     (agents: AuthorAgent[]) => {
       closeScan.current = api.streamExploit(
         (e) => {
           if (e.type === 'author_started') patchAuthor(e.findingId, { state: 'running', startedAt: Date.now(), model: e.model });
-          else if (e.type === 'author_finished')
+          else if (e.type === 'author_finished') {
+            authoredRef.current[e.findingId] = e.command;
             patchAuthor(e.findingId, { state: 'done', durationMs: e.durationMs, command: e.command, rationale: e.rationale, impact: e.impact, source: e.source, model: e.model });
-          else if (e.type === 'authors_done') {
+          } else if (e.type === 'authors_done') {
             closeScan.current?.();
             closeScan.current = null;
+            startDeliver();
           }
         },
         () => runAuthorsSim(agents),
       );
     },
-    [patchAuthor, runAuthorsSim],
+    [patchAuthor, runAuthorsSim, startDeliver],
   );
 
   const startExploit = useCallback(() => {
     clearTimers();
+    authoredRef.current = {};
+    setAttack(freshAttack());
     const agents = buildAuthors();
+    topFindingRef.current = agents[0]?.findingId ?? null;
     setAuthorAgents(agents);
     setPhase('exploit');
     if (modeRef.current === 'live') runAuthorsLive(agents);
@@ -270,18 +378,21 @@ export function usePipeline(): Pipeline {
 
   const reset = useCallback(() => {
     clearTimers();
+    authoredRef.current = {};
+    topFindingRef.current = null;
     setAgents(freshAgents());
     setFindings([]);
     setRanking([]);
     setScanStartedAt(null);
     setAuthorAgents([]);
+    setAttack(freshAttack());
     setPhase(hardware.connected ? 'ready' : 'connect');
   }, [clearTimers, hardware.connected]);
 
   useEffect(() => () => clearTimers(), [clearTimers]);
 
   return useMemo(
-    () => ({ mode, phase, hardware, target, agents, findings, ranking, scanStartedAt, authorAgents, startScan, startExploit, reset }),
-    [mode, phase, hardware, target, agents, findings, ranking, scanStartedAt, authorAgents, startScan, startExploit, reset],
+    () => ({ mode, phase, hardware, target, agents, findings, ranking, scanStartedAt, authorAgents, attack, startScan, startExploit, approveAndPatch, reset }),
+    [mode, phase, hardware, target, agents, findings, ranking, scanStartedAt, authorAgents, attack, startScan, startExploit, approveAndPatch, reset],
   );
 }

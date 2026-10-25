@@ -15,10 +15,17 @@ import { buildGraph } from './exploit/graphModel';
 
 export function PortalApp() {
   const pipeline = usePipeline();
-  const { mode, phase, hardware, agents, findings, ranking, authorAgents, startScan, startExploit, reset } = pipeline;
+  const { mode, phase, hardware, agents, findings, ranking, authorAgents, attack, startScan, startExploit, approveAndPatch, reset } = pipeline;
 
   const [selected, setSelected] = useState<ScanFinding | null>(null);
   const [selectedNode, setSelectedNode] = useState<string | null>(null);
+
+  // Let the detail panel follow the key beats as the attack unfolds.
+  useEffect(() => {
+    if (attack.device === 'compromised') setSelectedNode('device');
+    else if (attack.phase === 'awaiting_approval') setSelectedNode('factory');
+    else if (attack.phase === 'verified') setSelectedNode('verify');
+  }, [attack.device, attack.phase]);
 
   // Open the top-ranked finding automatically once ranking lands.
   useEffect(() => {
@@ -31,9 +38,9 @@ export function PortalApp() {
   useEffect(() => {
     if (phase !== 'exploit') return;
     if (selectedNode) return;
-    const first = buildGraph(authorAgents).nodes.find((n) => n.kind === 'author');
+    const first = buildGraph(authorAgents, attack).nodes.find((n) => n.kind === 'author');
     setSelectedNode(first?.id ?? 'deepseek');
-  }, [phase, authorAgents, selectedNode]);
+  }, [phase, authorAgents, attack, selectedNode]);
 
   const onReset = useCallback(() => {
     setSelected(null);
@@ -49,7 +56,7 @@ export function PortalApp() {
           : phase === 'exploit' ? 'exploiting'
             : hardware.connected ? 'ready' : 'waiting';
 
-  const selNode = buildGraph(authorAgents).nodes.find((n) => n.id === selectedNode) ?? null;
+  const selNode = buildGraph(authorAgents, attack).nodes.find((n) => n.id === selectedNode) ?? null;
 
   return (
     <div className="flex h-full flex-col bg-bg text-text">
@@ -71,6 +78,11 @@ export function PortalApp() {
         </div>
 
         <div className="flex items-center gap-2">
+          {attack.phase === 'awaiting_approval' && (
+            <button type="button" onClick={approveAndPatch} className="press state-transition glow-amber rounded-md bg-warn-bg px-3 py-1.5 text-sm font-medium text-warn-fg hover:bg-surface-3">
+              Approve &amp; deploy patch
+            </button>
+          )}
           {phase === 'review' && (
             <button type="button" onClick={startExploit} className="press state-transition rounded-md bg-accent-bg px-3 py-1.5 text-sm font-medium text-accent-fg hover:bg-surface-3">
               Generate exploits
@@ -94,8 +106,8 @@ export function PortalApp() {
         <ConnectScreen pipeline={pipeline} onStart={startScan} />
       ) : phase === 'exploit' ? (
         <main className="grid min-h-0 flex-1 grid-cols-1 gap-3 px-3 pb-3 lg:grid-cols-[minmax(0,1.7fr)_minmax(320px,1fr)]">
-          <AgentGraph authors={authorAgents} selectedId={selectedNode} onSelect={setSelectedNode} />
-          <AgentDetail node={selNode} findings={findings} />
+          <AgentGraph authors={authorAgents} attack={attack} selectedId={selectedNode} onSelect={setSelectedNode} />
+          <AgentDetail node={selNode} findings={findings} attack={attack} />
         </main>
       ) : (
         <main className="flex min-h-0 flex-1 flex-col gap-3 px-3 pb-3">
