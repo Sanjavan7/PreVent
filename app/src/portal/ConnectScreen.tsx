@@ -71,7 +71,7 @@ export function ConnectScreen({
   pipeline: Pipeline;
   onStart: (repo?: { owner: string; name: string }) => void;
 }) {
-  const { hardware, target, mode, scanError } = pipeline;
+  const { hardware, mode, scanError } = pipeline;
   const connected = hardware.connected;
   const reduce = !!useReducedMotion();
   const child = reduce ? revealReduced : revealChild;
@@ -98,8 +98,9 @@ export function ConnectScreen({
     });
   };
 
-  // What the file list previews: the uploaded folder, else the device target.
-  const files = folder?.files.length ? folder.files : (target?.files.map((f) => f.path) ?? []);
+  // Only preview files the user explicitly uploaded. On connect we just say
+  // "ready" — we don't list the device's own source.
+  const files = folder?.files ?? [];
 
   const scanLabel = !connected ? 'Waiting for device…' : repo ? `Scan ${repo.owner}/${repo.name}` : 'Scan device code';
 

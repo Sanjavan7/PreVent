@@ -1,5 +1,5 @@
 /*
- * PreVent - UNO R3 actuator firmware (owner: Hardware)
+ * UNO R3 actuator firmware — bedside ventilation unit
  *
  * Host <-> UNO serial schema (FROZEN, mirrored from contracts/src/serial.ts):
  *   115200 baud, '\n'-terminated lines, comma-delimited key=value, NO JSON.
@@ -92,10 +92,10 @@ const uint8_t SEG_BLANK = 0x00;
 
 // -------------------------------------------------------------- state ----
 struct DeviceState {
-  uint8_t fan;     // 0|1  (TRUE state)
+  uint8_t fan;     // 0|1  fan on/off
   uint8_t rate;    // 0..255 PWM duty
-  int     hr;      // REPORTED
-  int     spo2;    // REPORTED
+  int     hr;      // displayed heart rate
+  int     spo2;    // displayed SpO2
   uint8_t alarm;   // 0|1
   uint8_t rgb;     // 0 green, 1 red, 2 amber
 };
@@ -124,7 +124,7 @@ unsigned long g_segLastUs = 0;
 
 // ------------------------------------------------------------- drivers ----
 
-// Fan: fan follows the TRUE state. L293D direction inputs are hard-wired
+// Fan follows the commanded state. L293D direction inputs are hard-wired
 // (IN1=5V, IN2=GND); only EN (D6) is PWM'd. Motor power comes from the
 // PSU/9V rail, NEVER from an Arduino pin.
 void driveFan(uint8_t fan, uint8_t rate) {
@@ -150,7 +150,7 @@ void driveRgb(uint8_t rgb) {
   writeRgbPin(PIN_RGB_B, b);
 }
 
-// LCD shows the REPORTED vitals (which may be a lie by design).
+// LCD shows the reported vitals.
 void driveLcd(const DeviceState &s) {
   char row[17];
   snprintf(row, sizeof(row), "HR %-3d SpO2 %-3d", s.hr, s.spo2);

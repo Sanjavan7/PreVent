@@ -1,22 +1,11 @@
-# Custom CWE-306 rule — no stock SemGrep rule covers "Flask route handler for a
-# STATE-CHANGING method with no auth decorator". Written WITH device-service/app.py:
-#   - FIRES on the vulnerable `@app.post("/device/command")` handler (no auth
-#     decorator directly above `def`).
-#   - SILENT on the patched handler (same route, but guarded by @require_token).
-#   - SILENT on read-only `@app.get(...)` endpoints (/device/status, /device/_truth):
-#     a status read is not a "critical function", so flagging it would be noise.
+# CWE-306 — a Flask route handler for a state-changing method (POST/PUT/PATCH/
+# DELETE) registered with no authentication decorator. Read-only GET routes are
+# out of scope (a status read is not a critical function). Handlers guarded by
+# @login_required, @require_token, a call-form @require_auth(...), or a FastAPI
+# Depends(...) auth dependency do not match.
 #
-# Scope to mutating verbs (post/put/patch/delete) only. The handlers use Flask's
-# @app.post / @app.get shortcuts, so $METHOD is the verb itself — that is what
-# lets this rule fire on the POST command but stay silent on the GET status read.
-#
-# Validate + test:
-#   semgrep scan --config device-service/rules --validate
-#   semgrep --test --config device-service/rules/missing-auth.yaml \
-#       security/tests/semgrep_fixtures/missing-auth.py
-# Run (pipeline):
-#   semgrep scan --config device-service/rules --json --metrics off \
-#       --disable-version-check --quiet device-service > semgrep.json
+# Run: semgrep scan --config device-service/rules --json --metrics off \
+#          --disable-version-check --quiet device-service
 
 rules:
   - id: flask-missing-auth-decorator
@@ -39,7 +28,6 @@ rules:
       technology:
         - flask
         - fastapi
-      author: "Dev 2 (security-verification) — PreVent, Cal Hacks 13.0"
     patterns:
       # A route handler whose decorator sits directly above `def`.
       - pattern: |

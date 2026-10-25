@@ -1,7 +1,9 @@
 // PreVent — the security console. Real hardware → real scan → ranked findings
-// that open the vulnerable code → a TWO-STAGE attack shown as a clickable graph:
-// DeepSeek curates the server exploit (live reasoning) → breach the server over
-// HTTP → curate the fan exploit → flash the real board. Click any agent to watch.
+// that open the vulnerable code → a PARALLEL attack shown as a clickable graph:
+// DeepSeek opens ONE conversation per finding (all at once), each reaching its
+// own exploitable-or-not verdict. The operator then picks an exploitable finding
+// and a route (breach the server over HTTP, or flash the real board), then runs
+// the Factory patch → approval → verify. Click any agent to watch it work.
 
 import { useCallback, useEffect, useState } from 'react';
 import type { ScanFinding } from './api';
@@ -16,14 +18,10 @@ import { buildGraph } from './exploit/graphModel';
 import { ArrowCircle } from './icons/ArrowCircle';
 
 const STAGE_WORD: Record<string, string> = {
-  curating_server: 'curating server exploit',
-  server_ready: 'server exploit ready',
-  breaching_server: 'breaching server',
-  server_breached: 'server breached',
-  curating_fan: 'curating fan exploit',
-  fan_ready: 'fan exploit ready',
-  flashing_fan: 'flashing the board',
-  fan_breached: 'fan stopped',
+  curating: 'DeepSeek curating (parallel)',
+  ready: 'exploits ready — pick one',
+  breaching: 'running the exploit',
+  breached: 'target breached',
   patching: 'Droid writing the fix',
   reviewing: 'reviewer auditing the diff',
   awaiting_approval: 'awaiting your approval',
@@ -36,10 +34,15 @@ const STAGE_WORD: Record<string, string> = {
 
 export function PortalApp() {
   const pipeline = usePipeline();
-  const { mode, phase, hardware, agents, scanSource, activeRepo, findings, ranking, authorAgents, exploitStage, serverBreach, fanBreach, patchAgent, reviewAgent, approved, verifyResult, startScan, startExploit, sendToServer, sendToFan, startPatch, approve, reject, reset } = pipeline;
+  const {
+    mode, phase, hardware, agents, scanSource, activeRepo, findings, ranking,
+    authorAgents, exploitStage, chosenFindingId, chosenRoute, patchParentFindingId,
+    serverBreach, fanBreach, patchAgent, reviewAgent, approved, verifyResult,
+    startScan, startExploit, chooseFinding, chooseRoute, runExploit, startPatch, approve, reject, reset,
+  } = pipeline;
 
   const [selected, setSelected] = useState<ScanFinding | null>(null);
-  const [selectedNode, setSelectedNode] = useState<string>('author-server');
+  const [selectedNode, setSelectedNode] = useState<string>('deepseek');
 
   useEffect(() => {
     if (selected || findings.length === 0) return;
@@ -47,20 +50,22 @@ export function PortalApp() {
     if (top) setSelected(top);
   }, [findings, ranking, selected]);
 
-  // Follow the two-stage attack, then the remediation beats.
+  // The exploitable findings the operator can run (the ones DeepSeek proved out).
+  const exploitableAuthors = authorAgents.filter((a) => a.verdict?.exploitable || a.command);
+
+  // Follow the parallel attack, then the remediation beats.
   useEffect(() => {
-    if (exploitStage === 'curating_server') setSelectedNode('author-server');
-    else if (exploitStage === 'server_breached') setSelectedNode('server');
-    else if (exploitStage === 'curating_fan') setSelectedNode('author-fan');
-    else if (exploitStage === 'fan_breached') setSelectedNode('fan');
+    if (exploitStage === 'curating') setSelectedNode((prev) => (prev.startsWith('author-') ? prev : `author-${authorAgents[0]?.findingId ?? ''}`));
+    else if (exploitStage === 'ready') setSelectedNode(chosenFindingId != null ? `author-${chosenFindingId}` : `author-${exploitableAuthors[0]?.findingId ?? authorAgents[0]?.findingId ?? ''}`);
+    else if (exploitStage === 'breaching' || exploitStage === 'breached') setSelectedNode(chosenRoute === 'fan' ? 'fan' : 'server');
     else if (exploitStage === 'patching') setSelectedNode('writer');
     else if (exploitStage === 'reviewing' || exploitStage === 'awaiting_approval') setSelectedNode('reviewer');
     else if (exploitStage === 'verifying' || exploitStage === 'verified' || exploitStage === 'patch_failed') setSelectedNode('verify');
-  }, [exploitStage]);
+  }, [exploitStage, chosenFindingId, chosenRoute]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const onReset = useCallback(() => {
     setSelected(null);
-    setSelectedNode('author-server');
+    setSelectedNode('deepseek');
     reset();
   }, [reset]);
 
@@ -72,8 +77,11 @@ export function PortalApp() {
           : phase === 'review' ? 'review'
             : hardware.connected ? 'ready' : 'waiting';
 
-  const selNode = buildGraph(authorAgents, exploitStage, serverBreach, fanBreach, { writer: patchAgent, reviewer: reviewAgent, verify: verifyResult }).nodes.find((n) => n.id === selectedNode) ?? null;
-  const live = exploitStage === 'curating_server' || exploitStage === 'curating_fan' || exploitStage === 'breaching_server' || exploitStage === 'flashing_fan' || exploitStage === 'patching' || exploitStage === 'reviewing' || exploitStage === 'verifying';
+  const selNode = buildGraph(authorAgents, exploitStage, serverBreach, fanBreach, {
+    chosenFindingId, chosenRoute, patchParentFindingId,
+    writer: patchAgent, reviewer: reviewAgent, verify: verifyResult,
+  }).nodes.find((n) => n.id === selectedNode) ?? null;
+  const live = exploitStage === 'curating' || exploitStage === 'breaching' || exploitStage === 'patching' || exploitStage === 'reviewing' || exploitStage === 'verifying';
 
   return (
     <div className="flex h-full flex-col bg-bg text-text">
@@ -92,30 +100,62 @@ export function PortalApp() {
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
-          {exploitStage === 'server_ready' && (
-            <button type="button" onClick={sendToServer} className="btn btn--primary animate-enter group px-4 py-1.5 text-sm">
-              Send to server
-              <ArrowCircle size={16} className="transition-transform group-hover:translate-x-0.5" />
-            </button>
-          )}
-          {exploitStage === 'fan_ready' && (
-            <button type="button" onClick={sendToFan} className="btn btn--danger animate-enter group px-4 py-1.5 text-sm">
-              Send to fan — flash board
-              <ArrowCircle size={16} className="transition-transform group-hover:translate-x-0.5" />
-            </button>
-          )}
-          {exploitStage === 'fan_breached' && (
-            <button type="button" onClick={startPatch} className="btn btn--primary animate-enter group px-4 py-1.5 text-sm">
-              Generate fix (Droid)
-              <ArrowCircle size={16} className="transition-transform group-hover:translate-x-0.5" />
-            </button>
-          )}
           {phase === 'review' && scanSource !== 'repo' && (
             <button type="button" onClick={startExploit} className="btn btn--primary animate-enter group px-4 py-1.5 text-sm">
               Generate exploits
               <ArrowCircle size={16} className="transition-transform group-hover:translate-x-0.5" />
             </button>
           )}
+
+          {/* Ready: pick an exploitable finding + a route, then run it. */}
+          {exploitStage === 'ready' && (
+            exploitableAuthors.length === 0 ? (
+              <span className="animate-enter font-mono text-meta text-text-muted">no exploitable findings — DeepSeek cleared them all</span>
+            ) : (
+              <div className="flex flex-wrap items-center gap-1.5 animate-enter">
+                <span className="font-mono text-meta text-text-muted">exploit</span>
+                {exploitableAuthors.map((a) => (
+                  <button
+                    key={a.findingId}
+                    type="button"
+                    onClick={() => chooseFinding(a.findingId)}
+                    className={`press rounded-pill border px-2.5 py-1 font-mono text-meta state-transition ${chosenFindingId === a.findingId ? 'border-accent bg-surface-2 text-accent-fg' : 'border-glass-border text-text-secondary hover:bg-surface-2'}`}
+                  >
+                    {a.file.split('/').pop()}
+                  </button>
+                ))}
+                <span className="mx-1 h-4 w-px bg-border" />
+                <span className="font-mono text-meta text-text-muted">via</span>
+                {(['server', 'fan'] as const).map((r) => (
+                  <button
+                    key={r}
+                    type="button"
+                    onClick={() => chooseRoute(r)}
+                    className={`press rounded-pill border px-2.5 py-1 font-mono text-meta state-transition ${chosenRoute === r ? 'border-accent bg-surface-2 text-accent-fg' : 'border-glass-border text-text-secondary hover:bg-surface-2'}`}
+                  >
+                    {r === 'server' ? 'server · HTTP' : 'fan · flash'}
+                  </button>
+                ))}
+                <button
+                  type="button"
+                  onClick={runExploit}
+                  disabled={chosenFindingId == null}
+                  className="btn btn--danger group ml-1 px-4 py-1.5 text-sm disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  Run exploit
+                  <ArrowCircle size={16} className="transition-transform group-hover:translate-x-0.5" />
+                </button>
+              </div>
+            )
+          )}
+
+          {exploitStage === 'breached' && (
+            <button type="button" onClick={startPatch} className="btn btn--primary animate-enter group px-4 py-1.5 text-sm">
+              Push patch (Factory)
+              <ArrowCircle size={16} className="transition-transform group-hover:translate-x-0.5" />
+            </button>
+          )}
+
           {phase === 'review' && (
             <button type="button" onClick={() => startScan(scanSource === 'repo' ? activeRepo ?? undefined : undefined)} className="btn btn--ghost px-4 py-1.5 text-sm">
               Rescan
@@ -133,7 +173,20 @@ export function PortalApp() {
         <ConnectScreen pipeline={pipeline} onStart={startScan} />
       ) : phase === 'exploit' ? (
         <main className="grid min-h-0 flex-1 grid-cols-1 gap-3 px-3 pb-3 lg:grid-cols-[minmax(0,1.7fr)_minmax(340px,1fr)]">
-          <AgentGraph authors={authorAgents} stage={exploitStage} serverBreach={serverBreach} fanBreach={fanBreach} patchAgent={patchAgent} reviewAgent={reviewAgent} verifyResult={verifyResult} selectedId={selectedNode} onSelect={setSelectedNode} />
+          <AgentGraph
+            authors={authorAgents}
+            stage={exploitStage}
+            chosenFindingId={chosenFindingId}
+            chosenRoute={chosenRoute}
+            patchParentFindingId={patchParentFindingId}
+            serverBreach={serverBreach}
+            fanBreach={fanBreach}
+            patchAgent={patchAgent}
+            reviewAgent={reviewAgent}
+            verifyResult={verifyResult}
+            selectedId={selectedNode}
+            onSelect={setSelectedNode}
+          />
           <AgentDetail node={selNode} findings={findings} serverBreach={serverBreach} fanBreach={fanBreach} stage={exploitStage} approved={approved} onApprove={approve} onReject={reject} />
         </main>
       ) : (

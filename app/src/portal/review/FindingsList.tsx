@@ -1,6 +1,8 @@
 // Ranked findings. Click one to open its real code in the viewer. While the
 // scan is still streaming, findings appear in arrival order; once ranking lands
-// they reorder by CVSS with exploitable ones marked.
+// they reorder by CVSS. We do NOT pre-label a finding "exploitable" or "decoy" —
+// whether it can actually be exploited is decided live by the DeepSeek agent in
+// the exploit stage, not stamped on it here.
 
 import type { RankItem, ScanFinding } from '../api';
 
@@ -25,14 +27,12 @@ export function FindingsList({ findings, ranking, selectedId, onSelect, scanning
     ? ranking.map((r) => ({ rank: r.rank, rankItem: r, finding: byId.get(r.findingId) })).filter((x) => x.finding)
     : findings.map((f, i) => ({ rank: i + 1, rankItem: undefined as RankItem | undefined, finding: f }));
 
-  const exploitable = ranking.filter((r) => r.real).length;
-
   return (
     <section className="panel flex min-h-0 flex-col overflow-hidden">
       <header className="flex items-center justify-between px-3.5 py-2.5">
         <span className="font-display text-lg font-normal text-text">Findings</span>
         <span className="font-mono text-meta text-text-muted">
-          {ranking.length ? `${exploitable} exploitable of ${findings.length}` : scanning ? 'scanning…' : `${findings.length}`}
+          {scanning ? 'scanning…' : ranking.length ? `${findings.length} findings · ranked by CVSS` : `${findings.length}`}
         </span>
       </header>
 
@@ -45,25 +45,23 @@ export function FindingsList({ findings, ranking, selectedId, onSelect, scanning
           <ul>
             {rows.map(({ rank, rankItem, finding }) => {
               const f = finding!;
-              const real = rankItem?.real ?? f.scanner === 'semgrep';
+              const highSev = /error|high/i.test(f.severity);
               const selected = selectedId === f.id;
               return (
                 <li key={f.id}>
                   <button
                     type="button"
                     onClick={() => onSelect(f)}
-                    className={`press flex w-full gap-3 border-t border-border px-3.5 py-2.5 text-left state-transition ${selected ? 'bg-surface-2' : 'hover:bg-surface-2'} ${real ? 'border-l-2 border-l-danger' : 'border-l-2 border-l-transparent'}`}
+                    className={`press flex w-full gap-3 border-t border-border px-3.5 py-2.5 text-left state-transition ${selected ? 'bg-surface-2' : 'hover:bg-surface-2'} ${highSev ? 'border-l-2 border-l-danger' : 'border-l-2 border-l-transparent'}`}
                   >
-                    <span className={`mt-px w-4 shrink-0 font-mono text-sm font-semibold tabular-nums ${rankItem && rank === 1 && real ? 'text-accent' : 'text-text-secondary'}`}>
+                    <span className={`mt-px w-4 shrink-0 font-mono text-sm font-semibold tabular-nums ${rankItem && rank === 1 ? 'text-accent' : 'text-text-secondary'}`}>
                       {rankItem ? rank : '·'}
                     </span>
                     <span className="min-w-0 flex-1">
                       <span className="flex flex-wrap items-center gap-2">
                         <span className={`rounded-pill px-2 py-0.5 text-overline uppercase ${sevPill(f.severity)}`}>{f.severity.toLowerCase()}</span>
                         {rankItem && <span className="font-mono text-meta text-text-secondary">CVSS {rankItem.cvss}</span>}
-                        <span className={`text-meta ${real ? 'text-danger-fg' : 'text-text-muted'}`}>
-                          {real ? 'exploitable' : 'decoy'}
-                        </span>
+                        {f.cwe && <span className="font-mono text-meta text-text-muted">{f.cwe}</span>}
                       </span>
                       <span className="mt-0.5 block truncate font-mono text-[11px] text-text-muted">
                         {f.ruleId} · {f.file}:{f.line}
