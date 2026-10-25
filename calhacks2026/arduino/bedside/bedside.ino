@@ -1,8 +1,8 @@
 #include <LiquidCrystal.h>
 #include <Wire.h>
 
-#define PIN_LED_RED    A1
-#define PIN_LED_GREEN  2
+#define PIN_LED_GREEN  A1   // fan spinning -> green (was red on A1; swapped)
+#define PIN_LED_RED    2    // fan stopped  -> red   (D2)
 #define PIN_LED_AMBER  6
 #define PIN_MOTOR_EN   5
 #define PIN_MOTOR_IN1  7
@@ -160,6 +160,13 @@ void runMotor(uint8_t duty) {
   analogWrite(PIN_MOTOR_EN, duty);
 }
 
+// The indicator LEDs sit on fixed resistors on non-PWM pins (A1/D2/D6), so
+// analogWrite can't dim them. Instead we gate them HIGH only inside a fast 50%
+// window (250 Hz, well above flicker) -> ~half brightness. Lower LED_ON_US to
+// dim further.
+#define LED_PWM_US 4000UL
+#define LED_ON_US  2000UL
+
 void driveOutputs() {
   out.band = env.pressure < PRESS_LO || env.pressure > PRESS_HI;
   if (out.missing) {
@@ -168,10 +175,19 @@ void driveOutputs() {
     int duty = map((int)env.pressure, (int)PRESS_LO, (int)PRESS_HI, 170, 210);
     runMotor((uint8_t)constrain(duty, 170, 210));
   }
-  digitalWrite(PIN_LED_GREEN, out.missing ? LOW : HIGH);
-  digitalWrite(PIN_LED_AMBER, (!out.missing && out.band) ? HIGH : LOW);
-  digitalWrite(PIN_LED_RED, out.missing ? HIGH : LOW);
-  digitalWrite(PIN_BUZZER, out.missing ? HIGH : LOW);
+
+  bool spinning = out.duty > 0;                     // fan actually commanded on
+  bool dim = (micros() % LED_PWM_US) < LED_ON_US;   // ~half-brightness gate
+
+  // Green when the fan spins, red when it's stopped — both dimmed.
+  digitalWrite(PIN_LED_GREEN, (spinning && dim) ? HIGH : LOW);
+  digitalWrite(PIN_LED_RED,   (!spinning && dim) ? HIGH : LOW);
+  digitalWrite(PIN_LED_AMBER, (spinning && out.band && dim) ? HIGH : LOW);
+
+  // Active buzzer (on/off only) — keep it quiet with a short ~120 ms beep each
+  // second while the fan is down, instead of a continuous blare.
+  bool beep = (millis() % 1000UL) < 120UL;
+  digitalWrite(PIN_BUZZER, (!spinning && beep) ? HIGH : LOW);
 }
 
 void shipFrame() {

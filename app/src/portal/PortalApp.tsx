@@ -10,9 +10,8 @@ import { ConnectScreen } from './ConnectScreen';
 import { ScanStrip } from './scan/ScanStrip';
 import { FindingsList } from './review/FindingsList';
 import { CodeViewer } from './review/CodeViewer';
-import { AgentGraph } from './exploit/AgentGraph';
-import { AgentDetail } from './exploit/AgentDetail';
-import { buildGraph } from './exploit/graphModel';
+import { DispatchStack } from './exploit/DispatchStack';
+import { SimulationPanel } from './exploit/SimulationPanel';
 
 const STAGE_WORD: Record<string, string> = {
   curating_server: 'curating server exploit',
@@ -30,7 +29,7 @@ export function PortalApp() {
   const { mode, phase, hardware, agents, findings, ranking, authorAgents, exploitStage, serverBreach, fanBreach, startScan, startExploit, sendToServer, sendToFan, reset } = pipeline;
 
   const [selected, setSelected] = useState<ScanFinding | null>(null);
-  const [selectedNode, setSelectedNode] = useState<string | null>(null);
+  const [selectedNode, setSelectedNode] = useState<string>('author-server');
 
   useEffect(() => {
     if (selected || findings.length === 0) return;
@@ -38,17 +37,15 @@ export function PortalApp() {
     if (top) setSelected(top);
   }, [findings, ranking, selected]);
 
-  // Follow the two-stage attack beats.
+  // Follow the two-stage attack beats — the active sub-agent auto-selects.
   useEffect(() => {
-    if (exploitStage === 'curating_server') setSelectedNode('author-server');
-    else if (exploitStage === 'server_breached') setSelectedNode('server');
-    else if (exploitStage === 'curating_fan') setSelectedNode('author-fan');
-    else if (exploitStage === 'fan_breached') setSelectedNode('fan');
+    if (exploitStage === 'curating_server' || exploitStage === 'breaching_server' || exploitStage === 'server_breached') setSelectedNode('author-server');
+    else if (exploitStage === 'curating_fan' || exploitStage === 'flashing_fan' || exploitStage === 'fan_breached') setSelectedNode('author-fan');
   }, [exploitStage]);
 
   const onReset = useCallback(() => {
     setSelected(null);
-    setSelectedNode(null);
+    setSelectedNode('author-server');
     reset();
   }, [reset]);
 
@@ -60,14 +57,13 @@ export function PortalApp() {
           : phase === 'review' ? 'review'
             : hardware.connected ? 'ready' : 'waiting';
 
-  const selNode = buildGraph(authorAgents, exploitStage, serverBreach, fanBreach).nodes.find((n) => n.id === selectedNode) ?? null;
   const live = exploitStage === 'curating_server' || exploitStage === 'curating_fan' || exploitStage === 'breaching_server' || exploitStage === 'flashing_fan';
 
   return (
     <div className="flex h-full flex-col bg-bg text-text">
       <header className="flex items-center justify-between gap-4 px-5 py-3">
         <div className="flex items-center gap-4">
-          <span className="text-lg font-bold tracking-tight">Pre<span className="text-success">Vent</span></span>
+          <span className="text-lg font-bold tracking-tight">Pre<span className="text-accent">Vent</span></span>
           <span className="flex items-center gap-2">
             <span className={`gem ${hardware.connected ? 'text-success' : 'text-text-muted'} ${phase === 'scanning' || live ? 'gem--live text-accent' : ''}`} style={{ width: 7, height: 7 }} />
             <span className="text-meta text-text-secondary">{statusWord}</span>
@@ -111,9 +107,9 @@ export function PortalApp() {
       {!working ? (
         <ConnectScreen pipeline={pipeline} onStart={startScan} />
       ) : phase === 'exploit' ? (
-        <main className="grid min-h-0 flex-1 grid-cols-1 gap-3 px-3 pb-3 lg:grid-cols-[minmax(0,1.7fr)_minmax(340px,1fr)]">
-          <AgentGraph authors={authorAgents} stage={exploitStage} serverBreach={serverBreach} fanBreach={fanBreach} selectedId={selectedNode} onSelect={setSelectedNode} />
-          <AgentDetail node={selNode} findings={findings} serverBreach={serverBreach} fanBreach={fanBreach} />
+        <main className="grid min-h-0 flex-1 grid-cols-1 gap-3 px-3 pb-3 lg:grid-cols-[minmax(300px,0.8fr)_minmax(0,1.55fr)]">
+          <DispatchStack agents={agents} authorAgents={authorAgents} stage={exploitStage} serverBreach={serverBreach} fanBreach={fanBreach} selectedId={selectedNode} onSelect={setSelectedNode} />
+          <SimulationPanel selectedId={selectedNode} findings={findings} ranking={ranking} agents={agents} authorAgents={authorAgents} serverBreach={serverBreach} fanBreach={fanBreach} stage={exploitStage} />
         </main>
       ) : (
         <main className="flex min-h-0 flex-1 flex-col gap-3 px-3 pb-3">
