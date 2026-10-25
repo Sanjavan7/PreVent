@@ -66,8 +66,6 @@ The whole security loop is a live agent anyone can call from ASI:One.
 
 A proof of fix that calls a model is not a proof. Removing the model from the verify step is the single decision that makes the result credible.
 
-![After the patch, the same exploit bytes are re-fired and the response flips to 401. The Command Center reads Exploit Blocked, 401, with the graph secured and no model in the check.](https://raw.githubusercontent.com/Sanjavan7/PreVent/main/devpost/media/shots/cc_verified.png)
-
 Trust nothing the device reports. Only a byte-for-byte replay of the attack shows a hole is actually closed.
 
 In healthcare, a human gate is not a weakness. It is the thing that makes autonomy adoptable, and it is the honest answer to whether an AI should be allowed to patch a medical device on its own.
