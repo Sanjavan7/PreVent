@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "@prevent/contracts": "workspace:*",
+    "@prevent/realtime": "workspace:*",
     "@serialport/parser-readline": "13.0.0",
     "serialport": "13.0.0",
     "spacetimedb": "2.13.0",
