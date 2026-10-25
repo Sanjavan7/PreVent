@@ -21,54 +21,53 @@
 
 @theme {
   /* ===== INK RAMP — near-black monitor glass with a faint green-teal cast ===== */
-  --color-bg:             #070c0b; /* page plane (monitor glass)        */
-  --color-surface:        #0c1312; /* instrument panel                  */
-  --color-surface-2:      #111a18; /* nested block, input, inactive     */
-  --color-surface-3:      #18231f; /* hover / pressed fill              */
+  --color-bg:             #ECFEDD; /* page plane                        */
+  --color-surface:        #f7fcef; /* instrument panel (soft off-white)  */
+  --color-surface-2:      #ebf4dd; /* nested block, input, code bg       */
+  --color-surface-3:      #e0ecce; /* hover / pressed fill               */
 
-  --color-border:         #1e2c29; /* default 1px hairline seam         */
-  --color-border-strong:  #2b3c38; /* emphasis + spinner track          */
+  --color-border:         #d2e3bf; /* default 1px hairline seam          */
+  --color-border-strong:  #b9d1a0; /* emphasis + spinner track           */
 
-  --color-text:           #e8f0ed; /* primary copy (not pure white)     */
-  --color-text-secondary: #9cb3ac; /* secondary copy                    */
-  --color-text-muted:     #68807a; /* timestamps, axis, captions        */
+  --color-text:           #17251b; /* primary copy (dark ink)            */
+  --color-text-secondary: #46594b; /* secondary copy                     */
+  --color-text-muted:     #76897a; /* timestamps, axis, captions         */
 
-  /* ===== INTERACTIVE / ACTIVE = telemetry teal (an agent is working) ===== */
-  --color-accent:         #1fc3d4;
-  --color-accent-fg:      #5fe0ec; /* accent TEXT/icons on dark (AA)    */
-  --color-accent-hover:   #16a9b8;
-  --color-accent-bg:      rgba(31, 195, 212, 0.12);
-  --color-accent-border:  rgba(31, 195, 212, 0.34);
+  /* ===== INTERACTIVE / ACTIVE = telemetry teal (darker for light bg) ===== */
+  --color-accent:         #0ea5b7;
+  --color-accent-fg:      #0a7f8d; /* accent TEXT/icons on light (AA)    */
+  --color-accent-hover:   #0b8a99;
+  --color-accent-bg:      rgba(14, 165, 183, 0.12);
+  --color-accent-border:  rgba(14, 165, 183, 0.34);
 
-  /* ===== BRAND / SAFE / VERIFIED = vital green (the earned payoff) ===== */
-  --color-brand:          #2fd08a;
-  --color-brand-fg:       #63e6b4;
-  --color-brand-bg:       rgba(47, 208, 138, 0.12);
-  --color-brand-border:   rgba(47, 208, 138, 0.34);
-  /* success is an alias of brand green: 401 chip, final restore, "fix holds" */
-  --color-success:        #2fd08a;
-  --color-success-fg:     #63e6b4;
-  --color-success-bg:     rgba(47, 208, 138, 0.12);
+  /* ===== BRAND / SAFE / VERIFIED = vital green (darker for light bg) ===== */
+  --color-brand:          #16a05f;
+  --color-brand-fg:       #138a52;
+  --color-brand-bg:       rgba(22, 160, 95, 0.12);
+  --color-brand-border:   rgba(22, 160, 95, 0.34);
+  --color-success:        #16a05f;
+  --color-success-fg:     #138a52;
+  --color-success-bg:     rgba(22, 160, 95, 0.14);
 
   /* ===== CRITICAL = the lie / compromise / error / guardrail ===== */
-  --color-danger:         #f0565b;
-  --color-danger-fg:      #ff8589;
-  --color-danger-bg:      rgba(240, 86, 91, 0.12);
+  --color-danger:         #e23b40;
+  --color-danger-fg:      #c62b31;
+  --color-danger-bg:      rgba(226, 59, 64, 0.12);
 
   /* ===== CAUTION = human-approval gate + patching in progress ===== */
-  --color-warn:           #e8a13a;
-  --color-warn-fg:        #f6c277;
-  --color-warn-bg:        rgba(232, 161, 58, 0.12);
+  --color-warn:           #d9901f;
+  --color-warn-fg:        #a56c0c;
+  --color-warn-bg:        rgba(217, 144, 31, 0.14);
 
-  /* ===== MISSION-CONTROL EXTRAS (canvas, node glow, flow wires) ===== */
-  --color-grid:           rgba(47, 208, 138, 0.05);  /* faint phosphor grid    */
-  --color-grid-strong:    rgba(47, 208, 138, 0.09);
-  --color-wire:           #233733;                   /* idle flow connector    */
-  --color-wire-active:    #1fc3d4;                   /* data is flowing        */
-  --glow-teal:            0 0 0 1px rgba(31,195,212,0.40), 0 0 18px -2px rgba(31,195,212,0.45);
-  --glow-green:           0 0 0 1px rgba(47,208,138,0.40), 0 0 18px -2px rgba(47,208,138,0.45);
-  --glow-red:             0 0 0 1px rgba(240,86,91,0.42),  0 0 18px -2px rgba(240,86,91,0.48);
-  --glow-amber:           0 0 0 1px rgba(232,161,58,0.42), 0 0 18px -2px rgba(232,161,58,0.48);
+  /* ===== EXTRAS (canvas grid, node glow, flow wires) on light ===== */
+  --color-grid:           rgba(22, 90, 50, 0.06);    /* faint grid on green    */
+  --color-grid-strong:    rgba(22, 90, 50, 0.10);
+  --color-wire:           #c3d7ad;                   /* idle flow connector    */
+  --color-wire-active:    #0ea5b7;                   /* data is flowing        */
+  --glow-teal:            0 0 0 1px rgba(14,165,183,0.35), 0 0 16px -2px rgba(14,165,183,0.40);
+  --glow-green:           0 0 0 1px rgba(22,160,95,0.35), 0 0 16px -2px rgba(22,160,95,0.40);
+  --glow-red:             0 0 0 1px rgba(226,59,64,0.38),  0 0 16px -2px rgba(226,59,64,0.42);
+  --glow-amber:           0 0 0 1px rgba(217,144,31,0.38), 0 0 16px -2px rgba(217,144,31,0.42);
 
   /* ===== FONTS — IBM Plex (engineering instrument, not consumer SaaS) ===== */
   --font-sans: "IBM Plex Sans", ui-sans-serif, system-ui, -apple-system, sans-serif;
@@ -118,8 +117,8 @@
   /* ===== ELEVATION — rings, not borders (depth via shadow on dark glass) =====
      Dark-mode depth shadows mostly vanish, so a hairline ring carries structure;
      a faint lift separates the hero surface from the quiet rail. */
-  --ring:         0 0 0 1px oklch(1 0 0 / 0.055);
-  --ring-raised:  0 0 0 1px oklch(1 0 0 / 0.07), 0 1px 2px oklch(0 0 0 / 0.4), 0 8px 24px -14px oklch(0 0 0 / 0.6);
+  --ring:         0 0 0 1px rgba(23, 37, 27, 0.07);
+  --ring-raised:  0 0 0 1px rgba(23, 37, 27, 0.08), 0 1px 2px rgba(23, 37, 27, 0.08), 0 10px 26px -14px rgba(23, 37, 27, 0.22);
   --shadow-card:  var(--ring);
 
   --animate-spin-slow: spin 0.8s linear infinite;
@@ -127,7 +126,7 @@
 
 /* ---------- Base ---------- */
 :root {
-  color-scheme: dark;
+  color-scheme: light;
 }
 html,
 body,
@@ -185,7 +184,7 @@ body {
 }
 /* The hero surface sits above the quiet rail. */
 .panel--raised {
-  background: color-mix(in oklab, var(--color-surface) 90%, #000);
+  background: color-mix(in oklab, var(--color-surface) 50%, #ffffff);
   box-shadow: var(--ring-raised);
 }
 
@@ -231,6 +230,15 @@ body {
   border: 1px solid currentColor;
   animation: beaconPing 1.9s var(--ease-out) infinite;
 }
+
+/* Agent-graph edges: dim when idle, glowing teal + gently pulsing when active. */
+.graph-edge { stroke: var(--color-wire); }
+.graph-edge-active {
+  stroke: var(--color-wire-active);
+  filter: drop-shadow(0 0 3px var(--color-wire-active));
+  animation: edgePulse 1.9s var(--ease-state) infinite;
+}
+@keyframes edgePulse { 0%, 100% { opacity: 0.55; } 50% { opacity: 1; } }
 
 /* Node glow helpers (the ONE place glow is allowed — live agents). */
 .glow-teal  { box-shadow: var(--glow-teal); }
@@ -284,6 +292,7 @@ body {
   .gem--live { animation: none; }
   .animate-enter { animation: none; }
   .beacon-core, .beacon-ping { animation: none; }
+  .graph-edge-active { animation: none; }
 }
 
 /* ---------- react-diff-view: de-animated, two-color, only inside a disclosure ---------- */

@@ -72,6 +72,88 @@ export type ScanEvent =
   | { type: 'ranking'; findings: ScanFinding[]; ranking: RankItem[]; durationMs: number }
   | { type: 'scan_done' };
 
+/** A DeepSeek-authored, validated device command (the exploit payload). */
+export interface AuthoredCommand {
+  action: string; // 'stop_fan' | 'set_rate' | 'resume'
+  rate?: number;
+  reportedOverrides?: { hr?: number; spo2?: number; alarm?: boolean };
+}
+
+export type ExploitEvent =
+  | { type: 'author_started'; agentId: string; findingId: number; target: string; file: string; model: string; ts: number; prompt: { system: string; user: string } }
+  | { type: 'author_delta'; agentId: string; findingId: number; text: string }
+  | { type: 'author_finished'; agentId: string; findingId: number; target: string; durationMs: number; model: string; source: string; command: AuthoredCommand; impact: string; rationale: string; fullText: string }
+  | { type: 'authors_done'; count: number };
+
+export interface FlashResult {
+  ok: boolean;
+  durationMs: number;
+  port: string;
+  log: string;
+  error: string | null;
+}
+
+function streamSSE<E>(path: string, onEvent: (e: E) => void, onError: () => void): () => void {
+  const es = new EventSource(`${BASE}${path}`);
+  es.onmessage = (m) => {
+    try {
+      onEvent(JSON.parse(m.data) as E);
+    } catch {
+      /* ignore malformed frame */
+    }
+  };
+  es.onerror = () => {
+    es.close();
+    onError();
+  };
+  return () => es.close();
+}
+
+export interface Vitals {
+  hr: number;
+  spo2: number;
+  fanOn?: boolean;
+  alarmActive: boolean;
+}
+
+export interface DeliverResult {
+  statusCode: number;
+  compromised: boolean;
+  impact: string;
+  true: Vitals;
+  reported: Vitals;
+}
+
+export interface PatchResult {
+  applied: boolean;
+  diffRef: string;
+  droid: string;
+}
+
+export interface VerifyResult {
+  statusCode: number;
+  passed: boolean;
+  detail: string;
+  true: Vitals;
+}
+
+async function postJSON<T>(path: string, body: unknown, timeoutMs = 20000): Promise<T> {
+  const ctl = new AbortController();
+  const t = setTimeout(() => ctl.abort(), timeoutMs);
+  try {
+    const res = await fetch(`${BASE}${path}`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(body ?? {}),
+      signal: ctl.signal,
+    });
+    if (!res.ok) throw new Error(`${path} -> ${res.status}`);
+    return (await res.json()) as T;
+  } finally {
+    clearTimeout(t);
+  }
+}
+
 async function getJSON<T>(path: string, timeoutMs = 2500): Promise<T> {
   const ctl = new AbortController();
   const t = setTimeout(() => ctl.abort(), timeoutMs);
@@ -91,20 +173,22 @@ export const api = {
   target: () => getJSON<Target>('/api/target'),
   file: (path: string) => getJSON<CodeFile>(`/api/file?path=${encodeURIComponent(path)}`),
 
-  /** Stream the real scan. Returns a cleanup fn. Calls onEvent per SSE message. */
-  streamScan(onEvent: (e: ScanEvent) => void, onError: () => void): () => void {
-    const es = new EventSource(`${BASE}/api/scan/stream`);
-    es.onmessage = (m) => {
-      try {
-        onEvent(JSON.parse(m.data) as ScanEvent);
-      } catch {
-        /* ignore malformed frame */
-      }
-    };
-    es.onerror = () => {
-      es.close();
-      onError();
-    };
-    return () => es.close();
-  },
+  /** Stream the real scan (one SSE message per agent event). */
+  streamScan: (onEvent: (e: ScanEvent) => void, onError: () => void) =>
+    streamSSE<ScanEvent>('/api/scan/stream', onEvent, onError),
+
+  /** Stream one DeepSeek exploit author's real reasoning (optionally a single
+   *  finding, so the server stage and the fan stage can run separately). */
+  streamExploit: (onEvent: (e: ExploitEvent) => void, onError: () => void, findingId?: number) =>
+    streamSSE<ExploitEvent>(`/api/exploit/stream${findingId != null ? `?finding=${findingId}` : ''}`, onEvent, onError),
+
+  // Stage 1 — real HTTP against the running device-service (server breach).
+  deliver: (command: AuthoredCommand) => postJSON<DeliverResult>('/api/deliver', { command }),
+  patch: () => postJSON<PatchResult>('/api/patch', {}),
+  verify: (command: AuthoredCommand) => postJSON<VerifyResult>('/api/verify', { command }),
+  restore: () => postJSON<{ ok: boolean }>('/api/restore', {}),
+
+  // Stage 2 — flash the malicious fan-off firmware to the real board (physical).
+  flash: () => postJSON<FlashResult>('/api/flash', {}, 180000),
+  flashRestore: () => postJSON<FlashResult>('/api/flash/restore', {}, 180000),
 };

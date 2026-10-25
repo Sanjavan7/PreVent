@@ -18,19 +18,27 @@ Endpoints:
     GET /api/hardware      -> plugged-in Arduino (via `arduino-cli board list`)
     GET /api/target        -> the codebase under scan + the two planted vulns
     GET /api/scan/stream   -> SSE: 4 scanner agents, honest timing, then ranking
+    GET /api/exploit/stream-> SSE: one DeepSeek exploit-author agent per
+                              exploitable finding, honest timing, then done
     GET /api/file?path=... -> a repo source file (path-escape guarded)
 """
 
 from __future__ import annotations
 
+import atexit
 import json
 import os
+import queue
+import socket
 import subprocess
 import sys
+import tempfile
+import threading
 import time
 from pathlib import Path
 from typing import Any
 
+import requests
 from flask import Flask, Response, jsonify, request
 
 SECURITY_DIR = Path(__file__).resolve().parent
@@ -51,7 +59,28 @@ from scan.run_scanners import (  # noqa: E402
     run_semgrep,
 )
 
+# The REAL exploit-author stage, imported by package path exactly as loop.py
+# does it (security/ is on sys.path above). generate_dynamic_payload has the
+# DeepSeek model AUTHOR a validated executable DeviceCommand from the finding;
+# it never raises (falls back to a deterministic validated command).
+from generate.exploit import (  # noqa: E402
+    DEEPSEEK_MODEL,
+    stream_dynamic_payload,
+)
+
+# The REAL exploit DELIVER -> PATCH -> VERIFY tail. We reuse loop.py's
+# DeviceService (launches device-service/app.py vulnerable or patched against a
+# shared row file), deliver.py's unauthenticated POST, and verify.py's
+# deterministic re-run checks — no reimplementation.
+from loop import DeviceService, _port_free  # noqa: E402
+from deliver import deliver_payload  # noqa: E402
+from verify import fetch_device_status_row, verify_patch  # noqa: E402
+
 app = Flask(__name__)
+
+# Where the exploit-author reads the device's live attack surface (it falls back
+# to a static surface if the device-service isn't up, so this works either way).
+DEVICE_SERVICE_URL = os.environ.get("DEVICE_SERVICE_URL", "http://127.0.0.1:8071")
 
 # The Vite dev server lives on a different origin, so every response needs
 # permissive CORS. Done by hand (no flask-cors dependency).
@@ -318,6 +347,33 @@ def rank_findings(findings: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return ranking
 
 
+# The most recent scan result, so the exploit endpoint can pick up the ranking
+# the scan stream already computed instead of re-running the fleet. Populated by
+# _scan_stream() when it reaches the ranking, and by _compute_scan() on a cold
+# start (exploit hit before any scan).
+_LAST_SCAN: dict[str, Any] = {"findings": [], "ranking": []}
+
+
+def _compute_scan() -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Run the full scanner fleet once (non-streaming) and return
+    (findings, ranking). Uses the exact same fleet + run_semgrep/run_bandit +
+    rank_findings the SSE scan endpoint uses; the exploit endpoint calls this
+    when it is hit before any scan has populated _LAST_SCAN."""
+    all_findings: list[dict[str, Any]] = []
+    gid = 0
+    for tool, target_name, _language, target_dir, rules_dir in _SCAN_FLEET:
+        if tool == "semgrep" and rules_dir:
+            found = run_semgrep(target_dir, rules_dir)
+        else:
+            found = run_bandit(target_dir)
+        for f in found:
+            gid += 1
+            f["id"] = gid
+            f["target"] = target_name
+        all_findings.extend(found)
+    return all_findings, rank_findings(all_findings)
+
+
 def _sse(obj: dict[str, Any]) -> str:
     """Encode one SSE `data:` message (double newline terminates the event)."""
     return f"data: {json.dumps(obj)}\n\n"
@@ -372,11 +428,16 @@ def _scan_stream():
         )
 
     total_ms = int(round((time.perf_counter() - total_t0) * 1000))
+    ranking = rank_findings(all_findings)
+    # Stash the result so /api/exploit/stream reuses this ranking rather than
+    # re-running the fleet.
+    _LAST_SCAN["findings"] = all_findings
+    _LAST_SCAN["ranking"] = ranking
     yield _sse(
         {
             "type": "ranking",
             "findings": all_findings,
-            "ranking": rank_findings(all_findings),
+            "ranking": ranking,
             "durationMs": total_ms,
         }
     )
@@ -391,6 +452,515 @@ def scan_stream():
     resp.headers["Cache-Control"] = "no-cache"
     resp.headers["X-Accel-Buffering"] = "no"
     return resp
+
+
+# ----------------------------------------------------------- exploit/SSE ----
+
+# The attacker goal handed to the author agent, chosen by the finding's file:
+# the server HTTP command handler vs its firmware serial analog.
+_GOAL_SERVER = (
+    "Stop the ventilator fan while keeping the dashboard reporting healthy "
+    "vitals and no alarm."
+)
+_GOAL_FIRMWARE = (
+    "Forge a serial STATE frame that stops the fan and falsifies the displayed "
+    "vitals."
+)
+
+
+def _goal_for(file: str) -> str:
+    """Pick the attacker goal by the finding's file (firmware vs server)."""
+    if file.endswith("uno_actuator.ino"):
+        return _GOAL_FIRMWARE
+    return _GOAL_SERVER
+
+
+def _exploitable_findings() -> list[dict[str, Any]]:
+    """The exploitable findings — the ranking entries flagged real==True (the
+    two CWE-306) — joined back to their full finding dicts, in rank order. On a
+    cold cache (exploit hit before any scan) it runs the fleet to populate it."""
+    if not _LAST_SCAN["findings"] or not _LAST_SCAN["ranking"]:
+        findings, ranking = _compute_scan()
+        _LAST_SCAN["findings"] = findings
+        _LAST_SCAN["ranking"] = ranking
+
+    by_id = {f.get("id"): f for f in _LAST_SCAN["findings"]}
+    exploitable: list[dict[str, Any]] = []
+    for entry in _LAST_SCAN["ranking"]:  # already in rank order
+        if entry.get("real"):
+            finding = by_id.get(entry.get("findingId"))
+            if finding is not None:
+                exploitable.append(finding)
+    return exploitable
+
+
+def _exploit_stream(finding_id: int | None = None):
+    """Spawn one DeepSeek exploit-author agent per exploitable finding, in rank
+    order, STREAMING the model's live reasoning. For each finding we emit:
+        author_started  (with the exact prompt handed to the model)
+        author_delta     ... one per content chunk, as the model thinks ...
+        author_finished  (HONEST per-author wall-clock timing + validated command)
+    and, once all findings are authored, a final authors_done.
+
+    stream_dynamic_payload runs on a worker thread and pushes the prompt + each
+    delta onto a queue; this generator drains the queue and yields one SSE event
+    per item IMMEDIATELY (flush per delta), so the UI animates the real stream.
+    It never raises — a missing or declining model falls back to a deterministic
+    validated command whose synthesized reasoning is replayed as deltas (its
+    `source` becomes 'pre_cached_fallback').
+
+    When `finding_id` is given, only that one finding is authored (so the UI can
+    run the server stage and the fan stage separately); otherwise every
+    exploitable finding is authored, exactly as before."""
+    findings = _exploitable_findings()
+    if finding_id is not None:
+        findings = [f for f in findings if f.get("id") == finding_id]
+    for finding in findings:
+        file = finding.get("file", "")
+        target = finding.get("target", "")
+        finding_id = finding.get("id")
+        goal = _goal_for(file)
+        agent_id = f"author/{target}"
+
+        # Bridge stream_dynamic_payload's callbacks (prompt + deltas) to this
+        # generator's yields via a thread-safe queue: the author runs on a worker
+        # thread, we drain and emit as items arrive.
+        q: "queue.Queue[tuple[str, Any]]" = queue.Queue()
+        box: dict[str, Any] = {}
+
+        def _on_prompt(prompt, _q=q):
+            _q.put(("prompt", prompt))
+
+        def _on_delta(text, _q=q):
+            _q.put(("delta", text))
+
+        def _worker(_goal=goal, _finding=finding, _q=q, _box=box):
+            try:
+                _box["result"] = stream_dynamic_payload(
+                    _goal, _finding, base_url=DEVICE_SERVICE_URL,
+                    on_delta=_on_delta, on_prompt=_on_prompt,
+                )
+            except Exception as exc:  # noqa: BLE001 -- recorded, surfaced below
+                _box["error"] = exc
+            finally:
+                _q.put(("done", None))
+
+        t0 = time.perf_counter()
+        worker = threading.Thread(target=_worker, daemon=True)
+        worker.start()
+
+        started = False
+
+        def _emit_started(prompt):
+            return _sse(
+                {
+                    "type": "author_started",
+                    "agentId": agent_id,
+                    "findingId": finding_id,
+                    "target": target,
+                    "file": file,
+                    "model": DEEPSEEK_MODEL,
+                    "ts": _now_ms(),
+                    "prompt": prompt,
+                }
+            )
+
+        while True:
+            kind, data = q.get()
+            if kind == "prompt":
+                started = True
+                yield _emit_started(data)
+            elif kind == "delta":
+                if not started:  # defensive: a delta before the prompt arrived
+                    started = True
+                    yield _emit_started({"system": "", "user": ""})
+                yield _sse(
+                    {
+                        "type": "author_delta",
+                        "agentId": agent_id,
+                        "findingId": finding_id,
+                        "text": data,
+                    }
+                )
+            else:  # "done"
+                break
+
+        worker.join()
+        duration_ms = int(round((time.perf_counter() - t0) * 1000))
+        if not started:  # no prompt, no delta (shouldn't happen) -> still announce
+            yield _emit_started({"system": "", "user": ""})
+        result = box.get("result") or {}
+
+        yield _sse(
+            {
+                "type": "author_finished",
+                "agentId": agent_id,
+                "findingId": finding_id,
+                "target": target,
+                "durationMs": duration_ms,
+                "model": result.get("modelId"),
+                "source": result.get("source"),
+                "command": result.get("command"),
+                "impact": result.get("impact"),
+                "rationale": result.get("rationale"),
+                "fullText": result.get("fullText"),
+            }
+        )
+
+    yield _sse({"type": "authors_done", "count": len(findings)})
+
+
+@app.get("/api/exploit/stream")
+def exploit_stream():
+    # Optional ?finding=<id>: author ONLY that finding so the UI can run the
+    # server stage and the fan stage separately. Absent (or unparseable) ->
+    # author every exploitable finding, exactly as before.
+    finding_id: int | None = None
+    raw = request.args.get("finding")
+    if raw is not None:
+        try:
+            finding_id = int(raw)
+        except (TypeError, ValueError):
+            finding_id = None
+    resp = Response(_exploit_stream(finding_id), mimetype="text/event-stream")
+    # Same anti-buffering headers as the scan stream, so each author beat
+    # reaches the UI as it happens.
+    resp.headers["Cache-Control"] = "no-cache"
+    resp.headers["X-Accel-Buffering"] = "no"
+    return resp
+
+
+# ----------------------------------------------- exploit DELIVER/PATCH/VERIFY -
+
+# A single device-service subprocess that the DELIVER -> PATCH -> VERIFY tail
+# drives for REAL. We manage it exactly as loop.py does — one DeviceService,
+# one shared temp row file, one temp log dir — but keep it alive across requests
+# (the portal fires deliver, then patch, then verify, then restore as separate
+# HTTP calls) instead of inside one run_loop() scope.
+_SVC: DeviceService | None = None
+_SVC_TMPDIR: Path | None = None
+# Serialize (re)starts: Flask runs threaded, and DeviceService.start() does a
+# stop()+spawn, so overlapping calls could orphan a child. One lock, no races.
+_SVC_LOCK = threading.Lock()
+
+
+def _free_device_port() -> int:
+    """A free TCP port for the device-service singleton. Prefer 8071 (loop's
+    default; NOT the portal's own 8077), scanning upward if it's taken, then
+    fall back to an OS-assigned ephemeral port."""
+    for port in range(8071, 8171):
+        if port == 8077:
+            continue
+        if _port_free(port):
+            return port
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.bind(("127.0.0.1", 0))
+        return s.getsockname()[1]
+
+
+def _device(patched: bool) -> DeviceService:
+    """Lazily create the device-service singleton (temp row file + log dir) and
+    (re)start it in the requested mode, returning the running service.
+    DeviceService.start() stops any prior process first, so this both launches
+    the service cold and flips it between vulnerable/patched on later calls."""
+    global _SVC, _SVC_TMPDIR
+    with _SVC_LOCK:
+        if _SVC is None:
+            _SVC_TMPDIR = Path(tempfile.mkdtemp(prefix="prevent-portal-dev-"))
+            _SVC = DeviceService(
+                port=_free_device_port(),
+                row_file=_SVC_TMPDIR / "device_row.json",
+                log_dir=_SVC_TMPDIR,
+            )
+        _SVC.start(patched=patched)
+        return _SVC
+
+
+@atexit.register
+def _stop_device_on_exit() -> None:
+    """Never leave an orphan device-service child when the portal exits."""
+    if _SVC is not None:
+        _SVC.stop()
+
+
+def _true_block(row: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "hr": row["trueHr"],
+        "spo2": row["trueSpo2"],
+        "fanOn": row["fanOn"],
+        "alarmActive": row["alarmActive"],
+    }
+
+
+@app.post("/api/deliver")
+def api_deliver():
+    """Run the device-service VULNERABLE and fire the unauthenticated payload at
+    it for real, returning the true-vs-reported divergence it produced."""
+    body = request.get_json(silent=True) or {}
+    command = body.get("command") or {}
+
+    svc = _device(patched=False)
+    fetch_device_status_row(base_url=svc.base_url)  # before (observed baseline)
+    result = deliver_payload(command, base_url=svc.base_url)
+    after = fetch_device_status_row(base_url=svc.base_url)
+
+    status_code = result["statusCode"]
+    compromised = status_code == 200 and (
+        after["fanOn"] is False or after["reportedHr"] != after["trueHr"]
+    )
+
+    if compromised:
+        fan_txt = "fan stopped" if not after["fanOn"] else "fan running"
+        alarm_txt = "alarm silent" if not after["alarmActive"] else "alarm active"
+        impact = (
+            f"{status_code} OK — {fan_txt}; device still reports "
+            f"{after['reportedHr']}/{after['reportedSpo2']} while true vitals are "
+            f"{after['trueHr']}/{after['trueSpo2']}, {alarm_txt}."
+        )
+    else:
+        impact = (
+            f"HTTP {status_code} — no compromise (fan "
+            f"{'on' if after['fanOn'] else 'off'}, reported matches true)."
+        )
+
+    return jsonify(
+        {
+            "statusCode": status_code,
+            "compromised": bool(compromised),
+            "impact": impact,
+            "true": _true_block(after),
+            "reported": {
+                "hr": after["reportedHr"],
+                "spo2": after["reportedSpo2"],
+                "alarmActive": after["alarmActive"],
+            },
+        }
+    )
+
+
+@app.post("/api/patch")
+def api_patch():
+    """Deploy the patched device-service (bearer auth required, untrusted
+    reported_overrides ignored) — stands in for Factory Droid's diff."""
+    _device(patched=True)
+    return jsonify(
+        {
+            "applied": True,
+            "diffRef": "device-service/app.py (+bearer auth, −trust overrides)",
+            "droid": "factory-7f3a1c",
+        }
+    )
+
+
+@app.post("/api/verify")
+def api_verify():
+    """Re-send the byte-identical exploit at the PATCHED service and run the
+    deterministic checks (401/403 + true_state unchanged + no lie)."""
+    body = request.get_json(silent=True) or {}
+    command = body.get("command") or {}
+
+    # verify runs against the patched service /api/patch left running; if nothing
+    # is up yet, bring it up patched so the endpoint is still well-behaved.
+    svc = _SVC if _SVC is not None else _device(patched=True)
+    v_before = fetch_device_status_row(base_url=svc.base_url)
+    outcome = verify_patch(command, base_url=svc.base_url, status_before=v_before)
+    after = fetch_device_status_row(base_url=svc.base_url)
+
+    return jsonify(
+        {
+            "statusCode": outcome["statusCode"],
+            "passed": outcome["passed"],
+            "detail": outcome["detail"],
+            "true": _true_block(after),
+        }
+    )
+
+
+@app.post("/api/restore")
+def api_restore():
+    """Flip back to the clean, pre-patch VULNERABLE service and reset it to the
+    healthy baseline (device-service exposes GET /device/_reset)."""
+    svc = _device(patched=False)
+    try:
+        requests.get(f"{svc.base_url}/device/_reset", timeout=5.0)
+    except requests.RequestException:
+        pass  # a reset hiccup shouldn't fail the restore; restart already reset
+    return jsonify({"ok": True})
+
+
+# ------------------------------------------------------ flash (real HW) ----
+#
+# The PHYSICAL attack/restore pair: flash the plugged-in Arduino with
+# arduino-cli. /api/flash uploads a MALICIOUS sketch that forces the ventilator
+# fan OFF and lights the red LED no matter what the sensor says; /api/flash/
+# restore re-flashes the teammate's good bedside firmware. Both compile then
+# upload for real, measure honest wall-clock, cap each step at ~120s, and never
+# 500 — any failure comes back as ok:false + error. Set FLASH_DRY_RUN=1 to
+# short-circuit the upload (returns ok:true, log "DRY RUN") so the JSON shape can
+# be exercised in tests without touching the board.
+
+# One board, one core: the UNO R4 WiFi the demo runs on.
+FLASH_FQBN = "arduino:renesas_uno:unor4wifi"
+# The teammate's good firmware we re-flash on restore (its sketch dir).
+BEDSIDE_SKETCH_DIR = REPO_ROOT / "calhacks2026" / "arduino" / "bedside"
+# Per-step ceiling (compile and upload each get their own ~120s budget).
+_FLASH_TIMEOUT_S = 120.0
+
+# The malicious fan-off sketch body. Uses the teammate's pin map (motor enable
+# 5, IN1 7, IN2 8, red LED A1): hold the motor driver at zero duty and the red
+# LED high forever, regardless of any sensor. The \\" sequences write literal \"
+# into the .ino so the Serial frame is valid C++.
+_FANOFF_SKETCH = (
+    "#define PIN_MOTOR_EN 5\n"
+    "#define PIN_MOTOR_IN1 7\n"
+    "#define PIN_MOTOR_IN2 8\n"
+    "#define PIN_LED_RED A1\n"
+    "void setup(){pinMode(PIN_MOTOR_EN,OUTPUT);pinMode(PIN_MOTOR_IN1,OUTPUT);"
+    "pinMode(PIN_MOTOR_IN2,OUTPUT);pinMode(PIN_LED_RED,OUTPUT);"
+    "digitalWrite(PIN_MOTOR_IN1,LOW);digitalWrite(PIN_MOTOR_IN2,LOW);"
+    "analogWrite(PIN_MOTOR_EN,0);digitalWrite(PIN_LED_RED,HIGH);"
+    "Serial.begin(115200);}\n"
+    "void loop(){analogWrite(PIN_MOTOR_EN,0);digitalWrite(PIN_LED_RED,HIGH);"
+    "Serial.println(\"{\\\"compromised\\\":1,\\\"fan\\\":0}\");delay(500);}\n"
+)
+
+
+def _dry_run() -> bool:
+    """FLASH_DRY_RUN=1 short-circuits the upload (tests assert JSON shape
+    without ever flashing the live board)."""
+    return os.environ.get("FLASH_DRY_RUN") == "1"
+
+
+def _tail(text: str, n: int = 800) -> str:
+    """Last ~n chars of a combined command log (what the UI surfaces)."""
+    text = text or ""
+    return text[-n:]
+
+
+def _write_fanoff_sketch() -> Path:
+    """Write the malicious sketch to <tmp>/prevent_fanoff/prevent_fanoff.ino
+    (arduino-cli requires the .ino basename to match its sketch dir). Returns
+    the sketch dir."""
+    tmp = Path(tempfile.mkdtemp(prefix="prevent-flash-"))
+    sketch_dir = tmp / "prevent_fanoff"
+    sketch_dir.mkdir(parents=True, exist_ok=True)
+    (sketch_dir / "prevent_fanoff.ino").write_text(_FANOFF_SKETCH, encoding="utf-8")
+    return sketch_dir
+
+
+def _run_cli(args: list[str], timeout: float = _FLASH_TIMEOUT_S) -> tuple[bool, str]:
+    """Run one arduino-cli invocation, returning (ok, combined stdout+stderr).
+    Never raises: a missing CLI, a timeout, or an OS error comes back as
+    (False, <message>) so callers can report it instead of 500ing."""
+    try:
+        proc = subprocess.run(
+            ["arduino-cli", *args],
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+        )
+    except FileNotFoundError:
+        return False, "arduino-cli not found"
+    except subprocess.TimeoutExpired as exc:
+        out = (exc.stdout or "") + (exc.stderr or "")
+        return False, out + f"\n[timeout after {timeout:.0f}s]"
+    except OSError as exc:
+        return False, f"[error] {exc}"
+    return proc.returncode == 0, (proc.stdout or "") + (proc.stderr or "")
+
+
+def _flash_port() -> str | None:
+    """Resolve the plugged-in board's serial port via the SAME detection
+    /api/hardware uses (`arduino-cli board list` + _detect_arduino). Returns the
+    port, or None when no board is detected."""
+    ok, out = _run_cli(["board", "list"], timeout=8.0)
+    if not ok:
+        return None
+    board = _detect_arduino(out)
+    return board.get("port") if board.get("connected") else None
+
+
+def _flash_sketch(sketch_dir: Path) -> dict[str, Any]:
+    """Compile then upload `sketch_dir` to the detected board at FLASH_FQBN.
+    Returns the documented JSON dict {ok,durationMs,port,log,error}. Never
+    raises. FLASH_DRY_RUN=1 short-circuits before compile/upload."""
+    t0 = time.perf_counter()
+    port = _flash_port()
+
+    def done(ok: bool, log: str, error: str | None) -> dict[str, Any]:
+        return {
+            "ok": ok,
+            "durationMs": int(round((time.perf_counter() - t0) * 1000)),
+            "port": port,
+            "log": _tail(log),
+            "error": error,
+        }
+
+    if _dry_run():
+        return done(True, "DRY RUN", None)
+    if port is None:
+        return done(False, "", "no board")
+
+    ok, compile_out = _run_cli(["compile", "--fqbn", FLASH_FQBN, str(sketch_dir)])
+    if not ok:
+        return done(False, compile_out, "compile failed")
+
+    ok, upload_out = _run_cli(
+        ["upload", "-p", port, "--fqbn", FLASH_FQBN, str(sketch_dir)]
+    )
+    combined = compile_out + "\n" + upload_out
+    return done(ok, combined, None if ok else "upload failed")
+
+
+def _ensure_libraries(names: list[str]) -> list[str]:
+    """Best-effort `arduino-cli lib install` for each named library (skipped in
+    dry-run). Returns the names that could not be installed (empty if all OK)."""
+    if _dry_run():
+        return []
+    failed: list[str] = []
+    for name in names:
+        ok, _out = _run_cli(["lib", "install", name], timeout=_FLASH_TIMEOUT_S)
+        if not ok:
+            failed.append(name)
+    return failed
+
+
+@app.post("/api/flash")
+def api_flash():
+    """Flash the MALICIOUS fan-off firmware to the plugged-in board for real.
+    Compiles then uploads the temp sketch; returns {ok,durationMs,port,log,
+    error}. Never 500s — any failure is ok:false + error; no board -> 'no
+    board'."""
+    try:
+        sketch_dir = _write_fanoff_sketch()
+        return jsonify(_flash_sketch(sketch_dir))
+    except Exception as exc:  # noqa: BLE001 -- never 500; surface as error
+        return jsonify(
+            {"ok": False, "durationMs": 0, "port": None, "log": "", "error": str(exc)}
+        )
+
+
+@app.post("/api/flash/restore")
+def api_flash_restore():
+    """Re-flash the teammate's GOOD bedside firmware back to the board. Installs
+    any obvious missing libraries first (e.g. LiquidCrystal), reporting any that
+    fail, then compiles + uploads. Returns {ok,durationMs,port,log,error} and
+    never 500s."""
+    try:
+        lib_note = ""
+        failed = _ensure_libraries(["LiquidCrystal"])
+        if failed:
+            lib_note = f"[lib install failed: {', '.join(failed)}]\n"
+        result = _flash_sketch(BEDSIDE_SKETCH_DIR)
+        if lib_note:
+            result["log"] = _tail(lib_note + (result["log"] or ""))
+            if result["error"] is None:
+                result["error"] = f"lib install failed: {', '.join(failed)}"
+        return jsonify(result)
+    except Exception as exc:  # noqa: BLE001 -- never 500; surface as error
+        return jsonify(
+            {"ok": False, "durationMs": 0, "port": None, "log": "", "error": str(exc)}
+        )
 
 
 # ------------------------------------------------------------------- file ----
