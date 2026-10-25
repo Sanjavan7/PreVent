@@ -179,15 +179,13 @@ body {
   box-shadow: var(--ring-raised);
 }
 
-/* Faint phosphor grid for the flow canvas (monitor-glass texture). Masked so it
-   fades toward the edges instead of ending in a hard rectangle. */
+/* Faint, uniform phosphor grid (monitor-glass texture). No edge fade — the
+   canvas is a full surface, not a vignette. */
 .grid-field {
   background-image:
     linear-gradient(var(--color-grid) 1px, transparent 1px),
     linear-gradient(90deg, var(--color-grid) 1px, transparent 1px);
   background-size: 32px 32px;
-  -webkit-mask-image: radial-gradient(130% 90% at 30% 10%, #000 55%, transparent 100%);
-  mask-image: radial-gradient(130% 90% at 30% 10%, #000 55%, transparent 100%);
 }
 
 /* The pipeline trace: a thin spine the stations hang on. */
@@ -276,4 +274,41 @@ body {
 }
 .diff-decoration-content {
   color: var(--color-text-secondary);
+}
+
+/* ---------- Code viewer (shiki output) ---------- */
+.codeblock pre.shiki {
+  margin: 0;
+  padding: 12px 0;
+  background: transparent !important;
+  font-size: 12px;
+  line-height: 1.65;
+}
+.codeblock pre.shiki,
+.codeblock code {
+  font-family: var(--font-mono);
+}
+.codeblock .line {
+  display: block;
+  padding: 0 16px 0 0;
+  position: relative;
+  padding-left: 56px;
+}
+/* gutter line number from the absolute data-ln we set per line */
+.codeblock .line::before {
+  content: attr(data-ln);
+  position: absolute;
+  left: 0;
+  width: 40px;
+  text-align: right;
+  color: var(--color-text-muted);
+  opacity: 0.6;
+}
+.codeblock .line.vuln-line {
+  background: var(--color-danger-bg);
+  box-shadow: inset 2px 0 0 0 var(--color-danger);
+}
+.codeblock .line.vuln-line::before {
+  color: var(--color-danger-fg);
+  opacity: 1;
 }
