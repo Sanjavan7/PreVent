@@ -13,7 +13,7 @@ export interface NodeStyle {
 const STYLES: Record<NodeState, NodeStyle> = {
   idle: { text: 'text-text-muted', gem: 'text-border-strong', surface: '', live: false },
   active: { text: 'text-accent-fg', gem: 'text-accent', surface: 'panel panel--raised', live: true },
-  waiting: { text: 'text-warn-fg', gem: 'text-warn', surface: 'panel panel--raised', live: true },
+  waiting: { text: 'text-accent-fg', gem: 'text-accent', surface: 'panel panel--raised', live: true },
   done: { text: 'text-success-fg', gem: 'text-success', surface: '', live: false },
   alert: { text: 'text-danger-fg', gem: 'text-danger', surface: 'panel panel--raised', live: true },
 };

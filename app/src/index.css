@@ -21,53 +21,55 @@
 
 @theme {
   /* ===== INK RAMP — near-black monitor glass with a faint green-teal cast ===== */
-  --color-bg:             #ECFEDD; /* page plane                        */
-  --color-surface:        #f7fcef; /* instrument panel (soft off-white)  */
-  --color-surface-2:      #ebf4dd; /* nested block, input, code bg       */
-  --color-surface-3:      #e0ecce; /* hover / pressed fill               */
+  --color-bg:             #F1F5FA; /* cool clinical off-white (calm/trust) */
+  --color-surface:        #ffffff; /* white panel                        */
+  --color-surface-2:      #eef2f8; /* nested block, input, code bg       */
+  --color-surface-3:      #e1e8f2; /* hover / pressed fill               */
 
-  --color-border:         #d2e3bf; /* default 1px hairline seam          */
-  --color-border-strong:  #b9d1a0; /* emphasis + spinner track           */
+  --color-border:         #d5deea; /* default 1px hairline seam          */
+  --color-border-strong:  #b8c6da; /* emphasis + spinner track           */
 
-  --color-text:           #17251b; /* primary copy (dark ink)            */
-  --color-text-secondary: #46594b; /* secondary copy                     */
-  --color-text-muted:     #76897a; /* timestamps, axis, captions         */
+  --color-text:           #1a2736; /* navy-slate ink                     */
+  --color-text-secondary: #46566a; /* secondary copy                     */
+  --color-text-muted:     #7a8aa0; /* timestamps, axis, captions         */
 
-  /* ===== INTERACTIVE / ACTIVE = telemetry teal (darker for light bg) ===== */
-  --color-accent:         #0ea5b7;
-  --color-accent-fg:      #0a7f8d; /* accent TEXT/icons on light (AA)    */
-  --color-accent-hover:   #0b8a99;
-  --color-accent-bg:      rgba(14, 165, 183, 0.12);
-  --color-accent-border:  rgba(14, 165, 183, 0.34);
+  /* ===== INTERACTIVE / PRIMARY / TRUST = clinical blue ===== */
+  --color-accent:         #1c6fb0;
+  --color-accent-fg:      #145b92; /* accent TEXT on light (AA)          */
+  --color-accent-hover:   #175f9a;
+  --color-accent-bg:      rgba(28, 111, 176, 0.12);
+  --color-accent-border:  rgba(28, 111, 176, 0.32);
 
-  /* ===== BRAND / SAFE / VERIFIED = vital green (darker for light bg) ===== */
-  --color-brand:          #16a05f;
-  --color-brand-fg:       #138a52;
-  --color-brand-bg:       rgba(22, 160, 95, 0.12);
-  --color-brand-border:   rgba(22, 160, 95, 0.34);
-  --color-success:        #16a05f;
-  --color-success-fg:     #138a52;
-  --color-success-bg:     rgba(22, 160, 95, 0.14);
+  /* ===== BRAND = the trust blue (wordmark) ===== */
+  --color-brand:          #1c6fb0;
+  --color-brand-fg:       #145b92;
+  --color-brand-bg:       rgba(28, 111, 176, 0.12);
+  --color-brand-border:   rgba(28, 111, 176, 0.32);
 
-  /* ===== CRITICAL = the lie / compromise / error / guardrail ===== */
-  --color-danger:         #e23b40;
-  --color-danger-fg:      #c62b31;
-  --color-danger-bg:      rgba(226, 59, 64, 0.12);
+  /* ===== SAFE / VERIFIED / HEALTHY = clinical teal (not green) ===== */
+  --color-success:        #0e8e9e;
+  --color-success-fg:     #0b7382;
+  --color-success-bg:     rgba(14, 142, 158, 0.14);
 
-  /* ===== CAUTION = human-approval gate + patching in progress ===== */
-  --color-warn:           #d9901f;
-  --color-warn-fg:        #a56c0c;
-  --color-warn-bg:        rgba(217, 144, 31, 0.14);
+  /* ===== CRITICAL / THREAT = muted rose-red (not alarm red) ===== */
+  --color-danger:         #c34a54;
+  --color-danger-fg:      #a93a44;
+  --color-danger-bg:      rgba(195, 74, 84, 0.12);
 
-  /* ===== EXTRAS (canvas grid, node glow, flow wires) on light ===== */
-  --color-grid:           rgba(22, 90, 50, 0.06);    /* faint grid on green    */
-  --color-grid-strong:    rgba(22, 90, 50, 0.10);
-  --color-wire:           #c3d7ad;                   /* idle flow connector    */
-  --color-wire-active:    #0ea5b7;                   /* data is flowing        */
-  --glow-teal:            0 0 0 1px rgba(14,165,183,0.35), 0 0 16px -2px rgba(14,165,183,0.40);
-  --glow-green:           0 0 0 1px rgba(22,160,95,0.35), 0 0 16px -2px rgba(22,160,95,0.40);
-  --glow-red:             0 0 0 1px rgba(226,59,64,0.38),  0 0 16px -2px rgba(226,59,64,0.42);
-  --glow-amber:           0 0 0 1px rgba(217,144,31,0.38), 0 0 16px -2px rgba(217,144,31,0.42);
+  /* ===== CAUTION / ATTENTION / HUMAN GATE = amber ===== */
+  --color-warn:           #bd851c;
+  --color-warn-fg:        #966609;
+  --color-warn-bg:        rgba(189, 133, 28, 0.14);
+
+  /* ===== EXTRAS (canvas grid, node glow, flow wires) ===== */
+  --color-grid:           rgba(28, 60, 100, 0.05);   /* faint navy grid        */
+  --color-grid-strong:    rgba(28, 60, 100, 0.09);
+  --color-wire:           #c6d2e2;                   /* idle flow connector    */
+  --color-wire-active:    #1c6fb0;                   /* data is flowing        */
+  --glow-teal:            0 0 0 1px rgba(28,111,176,0.30), 0 0 16px -2px rgba(28,111,176,0.35);
+  --glow-green:           0 0 0 1px rgba(14,142,158,0.30), 0 0 16px -2px rgba(14,142,158,0.35);
+  --glow-red:             0 0 0 1px rgba(195,74,84,0.34),  0 0 16px -2px rgba(195,74,84,0.38);
+  --glow-amber:           0 0 0 1px rgba(189,133,28,0.34), 0 0 16px -2px rgba(189,133,28,0.38);
 
   /* ===== FONTS — IBM Plex (engineering instrument, not consumer SaaS) ===== */
   --font-sans: "IBM Plex Sans", ui-sans-serif, system-ui, -apple-system, sans-serif;

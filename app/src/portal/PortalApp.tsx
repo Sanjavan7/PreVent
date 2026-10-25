@@ -38,7 +38,7 @@ export function PortalApp() {
   const { mode, phase, hardware, agents, findings, ranking, authorAgents, exploitStage, serverBreach, fanBreach, patchAgent, reviewAgent, approved, verifyResult, startScan, startExploit, sendToServer, sendToFan, startPatch, approve, reject, reset } = pipeline;
 
   const [selected, setSelected] = useState<ScanFinding | null>(null);
-  const [selectedNode, setSelectedNode] = useState<string | null>(null);
+  const [selectedNode, setSelectedNode] = useState<string>('author-server');
 
   useEffect(() => {
     if (selected || findings.length === 0) return;
@@ -59,7 +59,7 @@ export function PortalApp() {
 
   const onReset = useCallback(() => {
     setSelected(null);
-    setSelectedNode(null);
+    setSelectedNode('author-server');
     reset();
   }, [reset]);
 
@@ -78,7 +78,7 @@ export function PortalApp() {
     <div className="flex h-full flex-col bg-bg text-text">
       <header className="flex items-center justify-between gap-4 px-5 py-3">
         <div className="flex items-center gap-4">
-          <span className="text-lg font-bold tracking-tight">Pre<span className="text-success">Vent</span></span>
+          <span className="text-lg font-bold tracking-tight">Pre<span className="text-accent">Vent</span></span>
           <span className="flex items-center gap-2">
             <span className={`gem ${hardware.connected ? 'text-success' : 'text-text-muted'} ${phase === 'scanning' || live ? 'gem--live text-accent' : ''}`} style={{ width: 7, height: 7 }} />
             <span className="text-meta text-text-secondary">{statusWord}</span>
