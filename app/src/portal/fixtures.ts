@@ -53,8 +53,16 @@ export interface CodeExcerpt {
 
 export const SIM_CODE: Record<string, CodeExcerpt> = {
   'device-service/app.py': {
-    startLine: 328,
-    content: `else:
+    startLine: 320,
+    content: `        # and the alarm honestly reflects a stopped fan.
+        reported_state["reported_hr"] = true_state["true_hr"]
+        reported_state["reported_spo2"] = true_state["true_spo2"]
+        reported_state["alarm_active"] = not true_state["fan_on"]
+
+        _sync_and_push(action)
+        return jsonify({"ok": True, "fan_on": true_state["fan_on"]})
+
+else:
     # VULNERABLE handler — CWE-306: Missing Authentication for Critical Function.
     # No auth decorator / token check at all. This is the function
     # rules/missing-auth.yaml is written to fire on.

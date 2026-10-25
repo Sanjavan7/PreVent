@@ -99,11 +99,11 @@
   --text-stat--letter-spacing: -0.02em;
   --text-stat--font-weight: 600;
 
-  /* ===== RADIUS (tighter, instrument-like: 8px dominant) ===== */
-  --radius-xs: 4px;
-  --radius-sm: 6px;
-  --radius-md: 8px;
-  --radius-lg: 10px;
+  /* ===== RADIUS (straighter, instrument-like: near-square corners) ===== */
+  --radius-xs: 2px;
+  --radius-sm: 3px;
+  --radius-md: 4px;
+  --radius-lg: 5px;
   --radius-pill: 999px;
 
   /* ===== MOTION — strong custom curves (default CSS easings feel weak) ===== */
@@ -164,6 +164,16 @@ body {
   from { opacity: 0; filter: blur(4px); transform: translateY(8px); }
   to { opacity: 1; filter: blur(0); transform: translateY(0); }
 }
+/* The "waiting for device" beacon: the core breathes (grows/shrinks + glows). */
+@keyframes beaconCore {
+  0%, 100% { transform: scale(1); box-shadow: 0 0 22px 2px color-mix(in oklab, currentColor 45%, transparent); }
+  50% { transform: scale(1.18); box-shadow: 0 0 44px 8px color-mix(in oklab, currentColor 70%, transparent); }
+}
+/* Concentric rings ping outward like a radar sweep. */
+@keyframes beaconPing {
+  0% { transform: scale(0.7); opacity: 0.55; }
+  100% { transform: scale(2.3); opacity: 0; }
+}
 
 /* ---------- Surfaces: depth via ring, not border ---------- */
 .panel,
@@ -210,6 +220,18 @@ body {
 }
 .gem--live { animation: pulseGem 1.6s var(--ease-state) infinite; }
 
+/* Waiting-for-device beacon. currentColor sets the hue (teal while waiting). */
+.beacon-core {
+  border-radius: 50%;
+  background: currentColor;
+  animation: beaconCore 1.9s var(--ease-state) infinite;
+}
+.beacon-ping {
+  border-radius: 50%;
+  border: 1px solid currentColor;
+  animation: beaconPing 1.9s var(--ease-out) infinite;
+}
+
 /* Node glow helpers (the ONE place glow is allowed — live agents). */
 .glow-teal  { box-shadow: var(--glow-teal); }
 .glow-green { box-shadow: var(--glow-green); }
@@ -255,6 +277,7 @@ body {
   .trace--active { animation: none; background: var(--color-wire-active); }
   .gem--live { animation: none; }
   .animate-enter { animation: none; }
+  .beacon-core, .beacon-ping { animation: none; }
 }
 
 /* ---------- react-diff-view: de-animated, two-color, only inside a disclosure ---------- */
