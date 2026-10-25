@@ -84,16 +84,16 @@ export function ConnectScreen({ pipeline, onStart }: { pipeline: Pipeline; onSta
       <div className="panel w-full max-w-xl p-4">
         <div className="text-sm font-medium text-text-secondary">Device code</div>
         <div className="mt-3 flex flex-col gap-2 sm:flex-row">
-          <div className="flex flex-1 items-center rounded-sm bg-surface-2 px-2.5">
-            <span className="font-mono text-meta text-text-muted">github.com/</span>
+          <div className="state-transition flex flex-1 items-center gap-2 rounded-sm border border-border bg-surface-2 px-2.5 focus-within:border-accent-border">
+            <span className="shrink-0 font-mono text-meta text-text-muted">github.com/</span>
             <input
               value={repoUrl}
               onChange={(e) => setRepoUrl(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && useRepo()}
               placeholder="org/repo"
-              className="flex-1 bg-transparent py-2 font-mono text-sm text-text outline-none placeholder:text-text-muted"
+              className="min-w-0 flex-1 bg-transparent py-2 font-mono text-sm text-text outline-none focus:outline-none focus-visible:outline-none placeholder:text-text-muted"
             />
-            <button type="button" onClick={useRepo} className="press text-meta font-medium text-accent-fg">
+            <button type="button" onClick={useRepo} className="press shrink-0 text-meta font-medium text-accent-fg focus-visible:outline-none">
               use
             </button>
           </div>

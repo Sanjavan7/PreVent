@@ -1,0 +1,8 @@
+# PreVent Fetch.ai uAgent — ASI:One-facing layer (Python 3.11-3.13)
+# Install into the SAME venv as security/ (so `import security.*` resolves):
+#   uv pip install --python ./.venv/Scripts/python.exe -r fetch_agent/requirements.txt
+uagents==0.26.1          # Agent + Chat Protocol; chat_protocol_spec v0.3.0
+uagents-core==0.4.12     # content types (uagents_core.contrib.protocols.chat)
+openai>=1.40             # ASI:One client (OpenAI-compatible); optional
+requests>=2.31,<3        # device-service polling (shared with security/)
+# semgrep==1.182.1 / bandit==1.9.4 are STANDALONE tool installs, see security/README.md

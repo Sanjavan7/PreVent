@@ -1,8 +1,10 @@
 // The ONE useFrame that animates the entire bright ward (spec §7c). It renders
 // nothing.
 //
-// Perf contract: this is the single place anything (besides the crowd) moves per
-// frame. It reads the live device through the stable getDevice() accessor, turns
+// Perf contract: this is the single place anything DEVICE-DRIVEN moves per frame
+// (the crowd and the generic rooms' ambient resting-patient breath run their own
+// lightweight, device-independent useFrame subscribers). It reads the live device
+// through the stable getDevice() accessor, turns
 // it into target visual parameters with the pure visualState() map, and eases
 // every live value toward those targets with maath/easing damps -- mutating the
 // ward light rig, the judge-room focal materials, the focus spot, the ventilator
@@ -22,10 +24,18 @@
 
 import { useRef } from 'react';
 import { useFrame } from '@react-three/fiber';
-import type { MeshStandardMaterial } from 'three';
+import type { Color, MeshStandardMaterial } from 'three';
 import { easing } from 'maath';
 import type { DeviceStatus } from '@prevent/contracts';
-import { visualState, ACCENT_BLUE, CORAL } from './visualState';
+import {
+  visualState,
+  ACCENT_BLUE,
+  CORAL,
+  STATUS_GREEN,
+  STATUS_GREEN_BORDER,
+  STATUS_RED,
+  STATUS_RED_BORDER,
+} from './visualState';
 import { hex } from './palette';
 import type { SceneRefs } from './sceneRefs';
 
@@ -41,6 +51,14 @@ const LED_BASE_INTENSITY = 3;
 // Bellows geometry (matches JudgeRoom.tsx: bellows mesh at y = 1.62).
 const BELLOWS_BASE_Y = 1.62;
 const RESP_PERIOD = 4; // 15 breaths/min -- fixed (no respiration field in DeviceStatus)
+
+// Patient chest breathing (judge room). The breathing group sits at y = 0.6 in
+// JudgeRoom; these make the rise/fall clearly readable from the iso camera (a
+// visible chest lift + swell), far bigger than the old 3.5% hint. On attack the
+// chest settles still to its resting pose; on restore it eases back into rhythm.
+const BREATH_BASE_Y = 0.6;
+const BREATH_RISE = 0.08; // chest lifts ~8 cm at peak inhale (visible from iso)
+const BREATH_SCALE = 0.35; // + up to 35% torso swell on top of the lift
 
 const TWO_PI = Math.PI * 2;
 const PULSE_HZ = 0.8; // slow breath, NOT a strobe
@@ -69,6 +87,9 @@ export function DeviceDriver({ getDevice, refs, reducedMotion }: Props) {
   const phase = useRef({ bellows: 0, drip: 0 });
   const baseAz = useRef<number | null>(null);
   const lastAlarm = useRef<boolean | null>(null);
+  // Discrete life readout -- the status chip is rewritten only when this flips,
+  // so the chip never churns per frame (same pattern as lastAlarm above).
+  const lastAlive = useRef<boolean | null>(null);
 
   useFrame((state, delta) => {
     // Clamp delta so a tab-return or GC stall can't fling a damp past its target.
@@ -77,34 +98,53 @@ export function DeviceDriver({ getDevice, refs, reducedMotion }: Props) {
     const d = getDevice();
     const v = visualState(d, Date.now());
 
+    // Publish the live crash signal for CameraRig's crash dolly-in (ref, not
+    // state -- the attack must not reconcile the scene subtree).
+    refs.crashed.current = v.crashed;
+
+    // Under reduced motion the Canvas is frameloop="demand": a device change
+    // invalidates ONE frame, so easing.damp/dampC would advance only a fraction
+    // and freeze the crash visuals half-transitioned. Snap straight to the target
+    // instead (like CameraRig's reduced-motion path) so that single frame lands
+    // the full crash/restore state. Normal motion still eases.
+    const dampN = <T,>(obj: T, key: keyof T, target: number, smooth: number) => {
+      if (reducedMotion) (obj as Record<string, number>)[key as string] = target;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      else easing.damp(obj as any, key as any, target, smooth, dt);
+    };
+    const dampCol = (color: Color, target: number, smooth: number) => {
+      if (reducedMotion) color.set(target);
+      else easing.dampC(color, target, smooth, dt);
+    };
+
     // Slow 0.8 Hz breath (flat at its mean under reduced motion). Never a strobe.
     const pulse = reducedMotion ? 0.5 : 0.5 + 0.5 * Math.sin(t * TWO_PI * PULSE_HZ);
 
-    // ---- damp the warm-local axes (all eased; nothing snaps) ----------------
-    easing.damp(env.current, 'alert', v.alertLevel, 0.5, dt);
-    easing.damp(env.current, 'focus', v.focusOn ? 1 : 0, 0.6, dt);
-    easing.damp(env.current, 'dim', v.restDim, 0.6, dt);
-    easing.damp(env.current, 'emissive', v.emissive, 0.35, dt);
-    easing.damp(env.current, 'code', v.codeOpacity, 0.3, dt);
+    // ---- damp the warm-local axes (eased live; snapped under reduced motion) -
+    dampN(env.current, 'alert', v.alertLevel, 0.5);
+    dampN(env.current, 'focus', v.focusOn ? 1 : 0, 0.6);
+    dampN(env.current, 'dim', v.restDim, 0.6);
+    dampN(env.current, 'emissive', v.emissive, 0.35);
+    dampN(env.current, 'code', v.codeOpacity, 0.3);
     const alert = env.current.alert;
     const focus = env.current.focus;
 
     // ---- judge-room focal materials: warm blue -> coral, breathe on alert ---
     const cove = refs.roomCove.current;
     if (cove) {
-      easing.dampC(cove.emissive, v.coveColor, 0.5, dt);
+      dampCol(cove.emissive, v.coveColor, 0.5);
       cove.emissiveIntensity = lerp(0.3, 0.7 + 0.5 * pulse, alert);
     }
     const ring = refs.focusRing.current;
     if (ring) {
-      easing.dampC(ring.color, v.ringColor, 0.5, dt);
-      easing.dampC(ring.emissive, v.ringColor, 0.5, dt);
+      dampCol(ring.color, v.ringColor, 0.5);
+      dampCol(ring.emissive, v.ringColor, 0.5);
       // Always-on gentle halo; brightens + pulses as the room warms.
       ring.opacity = 0.35 + focus * (0.25 + 0.3 * pulse);
       ring.emissiveIntensity = lerp(0.9, 1.4, alert);
     }
     if (refs.inlayMat.current) {
-      easing.dampC(refs.inlayMat.current.color, v.inlayColor, 0.5, dt);
+      dampCol(refs.inlayMat.current.color, v.inlayColor, 0.5);
     }
 
     // ---- the rest of the ward RECEDES ~12% (never dark); judge spot rises ----
@@ -127,7 +167,7 @@ export function DeviceDriver({ getDevice, refs, reducedMotion }: Props) {
     // ---- ventilator status LED (mint -> coral; subtle pulse on alert) --------
     if (refs.led.current) {
       const mat = refs.led.current.material as MeshStandardMaterial;
-      easing.dampC(mat.emissive, v.ledColor, 0.3, dt);
+      dampCol(mat.emissive, v.ledColor, 0.3);
       mat.emissiveIntensity = LED_BASE_INTENSITY + (v.compromised ? 0.6 : 0) + alert * pulse * 0.8;
     }
 
@@ -146,19 +186,33 @@ export function DeviceDriver({ getDevice, refs, reducedMotion }: Props) {
         targetScaleY = 0.6;
         targetPosY = BELLOWS_BASE_Y - 0.05;
       }
-      easing.damp(bellows.scale, 'y', targetScaleY, 0.18, dt);
-      easing.damp(bellows.position, 'y', targetPosY, 0.18, dt);
+      dampN(bellows.scale, 'y', targetScaleY, 0.18);
+      dampN(bellows.position, 'y', targetPosY, 0.18);
     }
 
-    // ---- patient chest: subtle rise synced to the bellows --------------------
+    // ---- judge patient chest: a CLEARLY visible breath, synced to the bellows.
+    // While the fan moves air the chest lifts + swells on the shared 0.8-breath
+    // phase; the instant the fan stops it settles still to its resting pose (the
+    // visceral "the machine stopped breathing for them"); on restore it eases
+    // back into rhythm. Under reduced motion it holds a gentle static mid-inhale
+    // (alive, but not moving) and the resting pose on attack. No setState.
     const breathing = refs.breathing.current;
     if (breathing) {
-      let chest = 1;
-      if (v.bellowsActive && !reducedMotion) {
-        const stroke = 0.5 + 0.5 * Math.sin(phase.current.bellows * TWO_PI);
-        chest = 1 + stroke * 0.035;
+      let targetScaleY = 1;
+      let targetPosY = BREATH_BASE_Y;
+      if (v.bellowsActive) {
+        if (reducedMotion) {
+          targetScaleY = 1 + BREATH_SCALE * 0.5;
+          targetPosY = BREATH_BASE_Y + BREATH_RISE * 0.5;
+        } else {
+          // Share the bellows phase so chest + ventilator breathe in lockstep.
+          const stroke = 0.5 + 0.5 * Math.sin(phase.current.bellows * TWO_PI);
+          targetScaleY = 1 + stroke * BREATH_SCALE;
+          targetPosY = BREATH_BASE_Y + stroke * BREATH_RISE;
+        }
       }
-      easing.damp(breathing.scale, 'y', chest, 0.2, dt);
+      dampN(breathing.scale, 'y', targetScaleY, 0.16);
+      dampN(breathing.position, 'y', targetPosY, 0.18);
     }
 
     // ---- IV drip (cosmetic sawtooth) ----------------------------------------
@@ -172,6 +226,40 @@ export function DeviceDriver({ getDevice, refs, reducedMotion }: Props) {
     // ---- CODE HUD opacity (crisp DOM, no bloom) -----------------------------
     if (refs.codeHud.current) {
       refs.codeHud.current.style.opacity = env.current.code.toFixed(3);
+    }
+
+    // ---- big PATIENT STATUS chip: green "STABLE" <-> red "NO AIR" on a flip ---
+    // Discrete: rewritten only when the alive state actually changes (first frame
+    // included, since lastAlive starts null), so no per-frame DOM churn. The CSS
+    // transition on the element eases the colour swap. Under reduced motion the
+    // demand frameloop still fires this on each device change, so the readout
+    // stays truthful without any continuous animation.
+    if (lastAlive.current !== v.alive && refs.statusEl.current) {
+      const el = refs.statusEl.current;
+      if (v.alive) {
+        el.textContent = '● STABLE · BREATHING';
+        el.style.color = STATUS_GREEN;
+        el.style.borderColor = STATUS_GREEN_BORDER;
+        el.style.boxShadow = '0 4px 18px rgba(52,211,153,0.28)';
+      } else {
+        el.textContent = '● NO AIR · VENTILATOR STOPPED';
+        el.style.color = STATUS_RED;
+        el.style.borderColor = STATUS_RED_BORDER;
+        el.style.boxShadow = '0 4px 20px rgba(239,68,68,0.34)';
+      }
+      // Punctuate the money instant: a one-shot scale pop on the rising edge of a
+      // real flip (either direction), NOT on the initial mount (lastAlive null).
+      // The chip has no base transform (its parent <Html center> owns the
+      // centering), so we pop pure scale about its default center origin. WAAPI
+      // fill defaults to none, so it settles back to the untransformed base.
+      // Skipped under reduced motion.
+      if (!reducedMotion && lastAlive.current !== null) {
+        el.animate(
+          [{ transform: 'scale(1.14)' }, { transform: 'scale(1)' }],
+          { duration: 420, easing: 'ease-out' },
+        );
+      }
+      lastAlive.current = v.alive;
     }
 
     // ---- judge-room label chip warms only when the alarm state flips ---------

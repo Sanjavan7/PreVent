@@ -29,6 +29,7 @@ import {
   Bloom,
   EffectComposer,
   N8AO,
+  SMAA,
   ToneMapping,
 } from '@react-three/postprocessing';
 import type { BloomEffect, ChromaticAberrationEffect } from 'postprocessing';
@@ -43,10 +44,12 @@ interface Props {
 }
 
 export const Effects = memo(function Effects({ tier, bloomRef }: Props) {
-  const multisampling = tier === 'LOW' ? 0 : 4;
-
+  // multisampling=0 (no MSAA): N8AO reads the depth buffer, and an MSAA resolve
+  // blit of depth/stencil is illegal in WebGL2 (floods the console with
+  // GL_INVALID_OPERATION glBlitFramebuffer warnings). SMAA gives clean edge AA
+  // without a multisampled framebuffer, so the bright white walls stay crisp.
   return (
-    <EffectComposer multisampling={multisampling} frameBufferType={HalfFloatType}>
+    <EffectComposer multisampling={0} frameBufferType={HalfFloatType}>
       {tier === 'HIGH' && (
         <N8AO
           aoRadius={1.2}
@@ -68,6 +71,7 @@ export const Effects = memo(function Effects({ tier, bloomRef }: Props) {
         radius={0.6}
       />
       <ToneMapping mode={ToneMappingMode.NEUTRAL} />
+      <SMAA />
     </EffectComposer>
   );
 });

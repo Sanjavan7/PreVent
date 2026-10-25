@@ -41,6 +41,17 @@ security/.device_row.json
 security/.runs/
 *.device_row.json
 
+# fetch_agent evidence artifacts (signed manifests + SBOMs, per-run)
+fetch_agent/.artifacts/
+
+# uAgents local identity / private keys (SECRET) + storage — never commit
+private_keys.json
+*private_keys.json
+.uagents/
+agent_storage*.json
+*_data.json
+.playwright-cli/
+
 # OS / editor
 .DS_Store
 Thumbs.db

@@ -39,6 +39,7 @@ export function ActivityFeed({
               status={entry.status}
               title={entry.title}
               agentName={entry.agentName || undefined}
+              summary={entry.summary || undefined}
               at={entry.at}
               origin={origin}
               connectorActive={activeIndex >= 0 && i < activeIndex}

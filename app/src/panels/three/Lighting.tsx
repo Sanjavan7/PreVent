@@ -37,7 +37,7 @@ export const Lighting = memo(function Lighting({ hemiRef, sunRef }: Props) {
         intensity={1.8}
         color={C.sun}
         castShadow
-        shadow-mapSize={[2048, 2048]}
+        shadow-mapSize={[1024, 1024]}
         shadow-bias={-0.0004}
         shadow-normalBias={0.02}
       >

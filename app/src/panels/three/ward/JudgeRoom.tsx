@@ -27,6 +27,7 @@ import type { Vec3 } from './layout';
 import { RoomShell, MonitorBox, IVPole, Chair } from './furniture';
 import { CodeHud } from '../CodeHud';
 import { hex, C } from '../palette';
+import { STATUS_GREEN, STATUS_GREEN_BORDER } from '../visualState';
 import type { SceneRefs } from '../sceneRefs';
 
 interface Props {
@@ -159,7 +160,9 @@ export const JudgeRoom = memo(function JudgeRoom({
             <boxGeometry args={[0.95, 0.1, 2.05]} />
             <meshStandardMaterial color={hex(C.plastic)} metalness={0} roughness={0.6} />
           </mesh>
-          <RoundedBox args={[0.9, 0.14, 1.9]} radius={0.05} smoothness={3} position={[0, 0.47, 0.05]} castShadow>
+          {/* Mattress: thin flat slab on the frame -- no castShadow (the frame
+              below already grounds the bed). */}
+          <RoundedBox args={[0.9, 0.14, 1.9]} radius={0.05} smoothness={3} position={[0, 0.47, 0.05]}>
             <meshStandardMaterial color={hex(C.linen)} metalness={0} roughness={0.95} />
           </RoundedBox>
           {([-0.5, 0.5] as const).map((x) => (
@@ -263,6 +266,41 @@ export const JudgeRoom = memo(function JudgeRoom({
             }}
           >
             Room {label}
+          </div>
+        </Html>
+
+        {/* Big floating PATIENT STATUS chip -- the "is the patient alive" readout,
+            the single most important thing on the simulation laptop. Floats above
+            the foot of the bed (toward the corridor/viewer, clear of the room pin
+            and the "you are here" arrow). Default content = the calm GREEN state;
+            DeviceDriver rewrites its text + colour the instant the device flips to
+            "no air" (red) and back to "stable" (green). Billboarded crisp DOM so
+            it stays legible and face-on from any orbit angle. */}
+        <Html
+          position={[0.55, 2.3, 0.95]}
+          center
+          distanceFactor={9}
+          zIndexRange={[22, 0]}
+          style={{ pointerEvents: 'none', whiteSpace: 'nowrap' }}
+        >
+          <div
+            ref={refs.statusEl}
+            style={{
+              padding: '7px 16px',
+              borderRadius: 999,
+              border: `2px solid ${STATUS_GREEN_BORDER}`,
+              background: 'rgba(255,255,255,0.92)',
+              backdropFilter: 'blur(6px)',
+              color: STATUS_GREEN,
+              fontFamily: 'ui-sans-serif, system-ui, sans-serif',
+              fontSize: 15,
+              fontWeight: 800,
+              letterSpacing: '0.03em',
+              boxShadow: '0 4px 18px rgba(52,211,153,0.28)',
+              transition: 'color 0.35s ease, border-color 0.35s ease, box-shadow 0.35s ease',
+            }}
+          >
+            ● STABLE · BREATHING
           </div>
         </Html>
 

@@ -34,6 +34,9 @@ const OVERVIEW_TARGET: [number, number, number] = [-1.5, 0.5, -1];
 const FOCUS_Y = 0.55;
 // Pull the camera in to this fraction of the overview distance on focus.
 const FOCUS_DIST_FACTOR = 0.62;
+// Tighter pull on a crash -- a cinematic push-in on the judge room during the
+// attack, released back to FOCUS_DIST_FACTOR on restore.
+const CRASH_DIST_FACTOR = 0.42;
 // maath smoothTime -> ~0.6-0.9s to settle. Smaller = snappier.
 const GLIDE_SMOOTH = 0.32;
 // Clamp to the OrbitControls min/max distance (Scene.tsx: 16 / 44).
@@ -46,6 +49,12 @@ interface Props {
   controlsRef: RefObject<OrbitControlsHandle | null>;
   selectedId: string | null;
   reducedMotion: boolean;
+  /** Live physical-crash signal (written by DeviceDriver). On its rising edge the
+   *  rig dollies IN on the focused room; on the falling edge it eases back out. */
+  crashedRef: RefObject<boolean>;
+  /** True while the viewer is actively dragging -- we don't engage the crash
+   *  push-in mid-orbit so we never fight the user's camera. */
+  interactingRef: RefObject<boolean>;
 }
 
 function roomCenter(id: string | null): [number, number, number] | null {
@@ -54,7 +63,13 @@ function roomCenter(id: string | null): [number, number, number] | null {
   return room ? room.center : null;
 }
 
-export function CameraRig({ controlsRef, selectedId, reducedMotion }: Props) {
+export function CameraRig({
+  controlsRef,
+  selectedId,
+  reducedMotion,
+  crashedRef,
+  interactingRef,
+}: Props) {
   const camera = useThree((s) => s.camera);
   const invalidate = useThree((s) => s.invalidate);
 
@@ -68,13 +83,17 @@ export function CameraRig({ controlsRef, selectedId, reducedMotion }: Props) {
   const animating = useRef(false);
   const offset = useRef(new Vector3());
   const goal = useRef(new Vector3());
+  // Whether we're currently dollied IN for a crash (drives the distance factor).
+  const pushIn = useRef(false);
+  const lastCrashed = useRef(false);
 
   // Write the desired target into `goal` and return the desired distance.
   const desired = (): number => {
     const c = roomCenter(selectedId);
     if (c) {
       goal.current.set(c[0], FOCUS_Y, c[2]);
-      return Math.max(MIN_DIST, Math.min(MAX_DIST, overviewDist.current * FOCUS_DIST_FACTOR));
+      const factor = pushIn.current ? CRASH_DIST_FACTOR : FOCUS_DIST_FACTOR;
+      return Math.max(MIN_DIST, Math.min(MAX_DIST, overviewDist.current * factor));
     }
     goal.current.set(OVERVIEW_TARGET[0], OVERVIEW_TARGET[1], OVERVIEW_TARGET[2]);
     return overviewDist.current;
@@ -125,6 +144,21 @@ export function CameraRig({ controlsRef, selectedId, reducedMotion }: Props) {
       animating.current = true;
       dist.current.d = camera.position.distanceTo(controls.target);
       lastSelected.current = selectedId;
+    }
+
+    // A crash edge (re)starts a glide too, so the camera dollies IN on the
+    // focused room during the attack (and eases back out on restore) even though
+    // the selection never changes. We don't engage mid-drag, so we never yank the
+    // camera out from under a viewer who's actively orbiting. (reducedMotion
+    // already returned above -- no push-in there.)
+    const crashed = !!crashedRef.current;
+    if (crashed !== lastCrashed.current) {
+      lastCrashed.current = crashed;
+      if (!interactingRef.current) {
+        pushIn.current = crashed;
+        animating.current = true;
+        dist.current.d = camera.position.distanceTo(controls.target);
+      }
     }
     if (!animating.current) return;
 

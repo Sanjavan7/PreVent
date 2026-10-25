@@ -5,7 +5,7 @@
 // the next stage. Memoize the call in render; never run it in an effect.
 
 import type { AgentStatus, Stage } from '@prevent/contracts';
-import { STAGE_TITLE, statusFromState, type ActivityStatus } from './status';
+import { STAGE_SUMMARY, STAGE_TITLE, statusFromState, type ActivityStatus } from './status';
 
 export interface ActivityEntry {
   id: string;
@@ -16,6 +16,8 @@ export interface ActivityEntry {
   reasoning: string;
   confidence: number;
   uncertainty: string;
+  /** one quiet line shown once the row collapses to `done` (empty otherwise) */
+  summary: string;
   at: number;
 }
 
@@ -33,17 +35,21 @@ export function deriveActivity(agents: AgentStatus[]): ActivityEntry[] {
   const live = agents.filter((a) => a.state !== 'idle');
 
   const entries: ActivityEntry[] = live
-    .map((a) => ({
-      id: `stage:${a.stage}`,
-      stage: a.stage,
-      title: STAGE_TITLE[a.stage],
-      status: statusFromState(a.state),
-      agentName: a.agentName,
-      reasoning: a.reasoning,
-      confidence: a.confidence,
-      uncertainty: a.uncertainty,
-      at: a.updatedAt,
-    }))
+    .map((a) => {
+      const status = statusFromState(a.state);
+      return {
+        id: `stage:${a.stage}`,
+        stage: a.stage,
+        title: STAGE_TITLE[a.stage],
+        status,
+        agentName: a.agentName,
+        reasoning: a.reasoning,
+        confidence: a.confidence,
+        uncertainty: a.uncertainty,
+        summary: status === 'done' ? STAGE_SUMMARY[a.stage] : '',
+        at: a.updatedAt,
+      };
+    })
     // chronological; ties broken by canonical stage order.
     .sort(
       (x, y) =>
@@ -67,6 +73,7 @@ export function deriveActivity(agents: AgentStatus[]): ActivityEntry[] {
       reasoning: '',
       confidence: 0,
       uncertainty: '',
+      summary: '',
       at: Number.MAX_SAFE_INTEGER,
     });
   }
