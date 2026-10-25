@@ -24,6 +24,8 @@ We ran the whole loop ten times back to back in under ninety seconds.
 
 PreVent is one loop across five systems that all agree on a single database row.
 
+![Architecture: a Fetch.ai agent runs Claude, DeepSeek and two Factory Droids to find, prove, patch and verify a flaw, a human approves, and one SpacetimeDB row keeps the dashboard, the 3D ward and the Arduino in sync.](https://raw.githubusercontent.com/Sanjavan7/PreVent/main/devpost/architecture.png)
+
 Claude, through the Anthropic Agent SDK, is the judgment layer. It triages the scanner output with its reasoning streamed on screen, so you watch it reject decoys and lock onto the real flaw instead of just handing you a verdict.
 
 The exploit is written by a DeepSeek model on Bitdeer. We keep the model that writes offensive code separate from the model we trust to approve a fix, so no single model is both attacker and defender in the same loop. Featherless is an interchangeable fallback for the same open model.
@@ -35,6 +37,8 @@ SpacetimeDB holds the shared state and the audit trail. The orchestrator and the
 Fetch.ai wraps the whole loop as the PreVent-Security agent on Agentverse, so the full loop, human gate included, runs inside one ASI:One chat.
 
 The thing you watch is the ward: eight rooms of vitals streaming green at 60fps until one flatlines mid-attack, then recovers the instant the patch lands, all driven by the same database row as the physical fan. The frontend is React, Vite and Tailwind, with PixiJS for the vitals waveforms and three.js for the ward. The hardware is an Arduino driving a fan through a motor driver, with a pressure sensor, an LCD, status LEDs and a buzzer; the fan stands in for a ventilator and the printed mask is the patient side of the circuit. We planned and sketched parts of this in Mana, including the hardware wiring graphic and our build playbook.
+
+![The hardware: an Arduino driving a fan through an L293D motor driver, with a pressure sensor, an LCD reading live vitals, status LEDs and a buzzer. The fan stands in for a ventilator.](https://raw.githubusercontent.com/Sanjavan7/PreVent/main/devpost/hardware-devpost.png)
 
 ## Challenges we ran into
 
@@ -54,11 +58,15 @@ The verifier re-fires the exact exploit bytes and asserts the wire response flip
 
 The human gate is real, backed by a database identity check that will not let a patch be approved by whoever proposed it, inside a least-privilege design: the Droid Shield keeps the writer from running git, push or deploy, and the attacker and approver models run as separate processes.
 
+![The Command Center at the human gate: the attack graph on the left, the read-only reviewer's typed verdict at 88 percent confidence on the right, and the Approve and deploy button.](https://raw.githubusercontent.com/Sanjavan7/PreVent/main/devpost/media/shots/cc_patch.png)
+
 The whole security loop is a live agent anyone can call from ASI:One.
 
 ## What we learned
 
 A proof of fix that calls a model is not a proof. Removing the model from the verify step is the single decision that makes the result credible.
+
+![After the patch, the same exploit bytes are re-fired and the response flips to 401. The Command Center reads Exploit Blocked, 401, with the graph secured and no model in the check.](https://raw.githubusercontent.com/Sanjavan7/PreVent/main/devpost/media/shots/cc_verified.png)
 
 Trust nothing the device reports. Only a byte-for-byte replay of the attack shows a hole is actually closed.
 
