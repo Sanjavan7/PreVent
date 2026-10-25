@@ -906,6 +906,98 @@ def _true_block(row: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+# ------------------------------------------- SpacetimeDB state mirror ----
+#
+# When the portal fires a payload (red) or lands a patch/recovery (green), mirror
+# the patient state to the shared SpacetimeDB `device_status` row so the 3D sim +
+# dashboard react to the REAL pipeline instead of a manual seed. Best-effort: a
+# missing CLI, stale login, or no network must NEVER break the demo, so every
+# failure is swallowed. Disable with PORTAL_SPACETIME_SYNC=0.
+
+_SPACETIME_STATES = {
+    # phase:      fanOn   trueHr trueSpo2 repHr repSpo2 alarm  compromised lastCommand
+    "attack": ["false", "35", "82", "72", "98", "false", "true", "stop_fan (unauthenticated)"],
+    "healthy": ["true", "72", "98", "72", "98", "false", "false", "healthy"],
+}
+
+
+def _spacetime_bin() -> str:
+    for cand in (
+        os.path.expanduser("~/.local/bin/spacetime"),
+        "/opt/homebrew/bin/spacetime",
+        "/usr/local/bin/spacetime",
+    ):
+        if os.path.exists(cand):
+            return cand
+    return "spacetime"
+
+
+def _mirror_db_state(phase: str) -> None:
+    """Best-effort write of device_status to SpacetimeDB. phase: 'attack'|'healthy'."""
+    if os.environ.get("PORTAL_SPACETIME_SYNC", "1") == "0":
+        return
+    args = _SPACETIME_STATES.get(phase)
+    if not args:
+        return
+    server = os.environ.get("SPACETIME_SERVER", "maincloud")
+    module = os.environ.get("VITE_SPACETIMEDB_MODULE", "prevent")
+    try:
+        subprocess.run(
+            [_spacetime_bin(), "call", "--server", server, module, "update_device_status", *args],
+            capture_output=True,
+            text=True,
+            timeout=15,
+        )
+    except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
+        pass
+
+
+# The board's current firmware, tracked so a transition only re-flashes when the
+# hardware isn't already in that state. The flash is slow (~8s) and holds the
+# serial port, so it runs on a daemon thread serialized by a lock — requests never
+# block and two flashes never fight for the port. Disable with PORTAL_HW_SYNC=0.
+_HW_LOCK = threading.Lock()
+_HW_STATE: str | None = None  # 'attack' | 'healthy' | None (unknown)
+
+
+def _note_hw_flashed(phase: str) -> None:
+    """Record that the board was just flashed to `phase` (called by the explicit
+    /api/flash* endpoints so the reconciler's tracking stays accurate)."""
+    global _HW_STATE
+    with _HW_LOCK:
+        _HW_STATE = phase
+
+
+def _reconcile_hardware(phase: str) -> None:
+    """Flash the board to match `phase` ('attack'|'healthy') unless it's already
+    there. Background + lock-serialized; best-effort (a missing board is fine)."""
+    if os.environ.get("PORTAL_HW_SYNC", "1") == "0":
+        return
+
+    def _work() -> None:
+        global _HW_STATE
+        with _HW_LOCK:
+            if phase == _HW_STATE:
+                return  # board already in this state — skip the ~8s flash
+            try:
+                if phase == "attack":
+                    _flash_sketch(_write_fanoff_sketch())
+                else:
+                    _flash_sketch(_write_healthy_sketch())
+                _HW_STATE = phase
+            except Exception:  # noqa: BLE001 -- hardware is best-effort
+                pass
+
+    threading.Thread(target=_work, daemon=True).start()
+
+
+def _apply_state(phase: str) -> None:
+    """Set BOTH the shared DB row (sim/dashboard) and the physical board to
+    `phase`, so software and hardware always move together."""
+    _mirror_db_state(phase)
+    _reconcile_hardware(phase)
+
+
 @app.post("/api/deliver")
 def api_deliver():
     """Run the device-service VULNERABLE and fire the unauthenticated payload at
@@ -941,6 +1033,12 @@ def api_deliver():
             f"HTTP {status_code} — no compromise (fan "
             f"{'on' if after['fanOn'] else 'off'}, reported matches true)."
         )
+
+    # Mirror a successful breach to the shared DB so the sim + dashboard go red.
+    # A non-compromise leaves the row untouched — recovery is the patch's job, and
+    # writing "healthy" here would race the physical fan-off flash fired alongside.
+    if compromised:
+        _apply_state("attack")
 
     return jsonify(
         {
@@ -1110,6 +1208,9 @@ def _patch_stream():
         # the dashboard showed in the diff — the green check is a property of the
         # deployed bytes, never an env flag.
         _apply_diff_idempotent(diff_text)
+        # Patch deployed -> reset BOTH the sim and the physical board to healthy,
+        # regardless of the verify outcome (fan back on, buzzer off, green LED).
+        _apply_state("healthy")
         svc = _device()
         yield _sse(
             {
@@ -1199,6 +1300,10 @@ def api_verify():
     outcome = verify_patch(command, base_url=svc.base_url, status_before=v_before)
     after = fetch_device_status_row(base_url=svc.base_url)
 
+    # Patch proven: the re-run was blocked, so the patient stays stable -> green.
+    if outcome["passed"]:
+        _apply_state("healthy")
+
     return jsonify(
         {
             "statusCode": outcome["statusCode"],
@@ -1225,6 +1330,7 @@ def api_restore():
         requests.get(f"{svc.base_url}/device/_reset", timeout=5.0)
     except requests.RequestException:
         pass  # a reset hiccup shouldn't fail the restore; restart already reset
+    _apply_state("healthy")  # back to clean vulnerable baseline -> sim + board green
     return jsonify({"ok": True})
 
 
@@ -1273,6 +1379,32 @@ _FANOFF_SKETCH = (
     "Serial.println(\"{\\\"compromised\\\":1,\\\"fan\\\":0}\");}}\n"
 )
 
+# The deterministic HEALTHY sketch — exact mirror of the attack sketch, forcing the
+# opposite state: fan ON (duty 200), GREEN LED on (dimmed), RED LED + buzzer off. It
+# does NOT read the SPA06 sensor, so "healthy" always shows a spinning fan regardless
+# of whether the sensor is wired/reading. Emits {"compromised":0,"fan":200}.
+_HEALTHY_SKETCH = (
+    "#define PIN_MOTOR_EN 5\n"
+    "#define PIN_MOTOR_IN1 7\n"
+    "#define PIN_MOTOR_IN2 8\n"
+    "#define PIN_LED_GREEN A1\n"
+    "#define PIN_LED_RED 2\n"
+    "#define PIN_BUZZER 13\n"
+    "unsigned long _tx=0;\n"
+    "void setup(){pinMode(PIN_MOTOR_EN,OUTPUT);pinMode(PIN_MOTOR_IN1,OUTPUT);"
+    "pinMode(PIN_MOTOR_IN2,OUTPUT);pinMode(PIN_LED_GREEN,OUTPUT);"
+    "pinMode(PIN_LED_RED,OUTPUT);pinMode(PIN_BUZZER,OUTPUT);"
+    "digitalWrite(PIN_MOTOR_IN1,HIGH);digitalWrite(PIN_MOTOR_IN2,LOW);"
+    "analogWrite(PIN_MOTOR_EN,200);digitalWrite(PIN_LED_RED,LOW);"
+    "digitalWrite(PIN_BUZZER,LOW);Serial.begin(115200);}\n"
+    "void loop(){digitalWrite(PIN_MOTOR_IN1,HIGH);digitalWrite(PIN_MOTOR_IN2,LOW);"
+    "analogWrite(PIN_MOTOR_EN,200);"
+    "digitalWrite(PIN_LED_GREEN,(micros()%4000UL)<2000UL?HIGH:LOW);"
+    "digitalWrite(PIN_LED_RED,LOW);digitalWrite(PIN_BUZZER,LOW);"
+    "if(millis()-_tx>=500){_tx=millis();"
+    "Serial.println(\"{\\\"compromised\\\":0,\\\"fan\\\":200}\");}}\n"
+)
+
 
 def _dry_run() -> bool:
     """FLASH_DRY_RUN=1 short-circuits the upload (tests assert JSON shape
@@ -1294,6 +1426,16 @@ def _write_fanoff_sketch() -> Path:
     sketch_dir = tmp / "prevent_fanoff"
     sketch_dir.mkdir(parents=True, exist_ok=True)
     (sketch_dir / "prevent_fanoff.ino").write_text(_FANOFF_SKETCH, encoding="utf-8")
+    return sketch_dir
+
+
+def _write_healthy_sketch() -> Path:
+    """Write the deterministic HEALTHY sketch to <tmp>/prevent_healthy/ (forces fan
+    on, green LED, no buzzer — sensor-independent). Returns the sketch dir."""
+    tmp = Path(tempfile.mkdtemp(prefix="prevent-flash-"))
+    sketch_dir = tmp / "prevent_healthy"
+    sketch_dir.mkdir(parents=True, exist_ok=True)
+    (sketch_dir / "prevent_healthy.ino").write_text(_HEALTHY_SKETCH, encoding="utf-8")
     return sketch_dir
 
 
@@ -1382,7 +1524,11 @@ def api_flash():
     board'."""
     try:
         sketch_dir = _write_fanoff_sketch()
-        return jsonify(_flash_sketch(sketch_dir))
+        result = _flash_sketch(sketch_dir)
+        if result.get("ok"):
+            _note_hw_flashed("attack")  # keep the reconciler's tracking accurate
+            _mirror_db_state("attack")  # physical fan-off fired -> sim red
+        return jsonify(result)
     except Exception as exc:  # noqa: BLE001 -- never 500; surface as error
         return jsonify(
             {"ok": False, "durationMs": 0, "port": None, "log": "", "error": str(exc)}
@@ -1391,20 +1537,14 @@ def api_flash():
 
 @app.post("/api/flash/restore")
 def api_flash_restore():
-    """Re-flash the teammate's GOOD bedside firmware back to the board. Installs
-    any obvious missing libraries first (e.g. LiquidCrystal), reporting any that
-    fail, then compiles + uploads. Returns {ok,durationMs,port,log,error} and
-    never 500s."""
+    """Re-flash the deterministic HEALTHY sketch (fan on, green LED, no buzzer —
+    sensor-independent) so the board is VISIBLY healthy no matter what the SPA06
+    sensor is doing. Returns {ok,durationMs,port,log,error} and never 500s."""
     try:
-        lib_note = ""
-        failed = _ensure_libraries(["LiquidCrystal"])
-        if failed:
-            lib_note = f"[lib install failed: {', '.join(failed)}]\n"
-        result = _flash_sketch(BEDSIDE_SKETCH_DIR)
-        if lib_note:
-            result["log"] = _tail(lib_note + (result["log"] or ""))
-            if result["error"] is None:
-                result["error"] = f"lib install failed: {', '.join(failed)}"
+        result = _flash_sketch(_write_healthy_sketch())
+        if result.get("ok"):
+            _note_hw_flashed("healthy")  # keep the reconciler's tracking accurate
+            _mirror_db_state("healthy")  # fan on, green LED -> sim green
         return jsonify(result)
     except Exception as exc:  # noqa: BLE001 -- never 500; surface as error
         return jsonify(

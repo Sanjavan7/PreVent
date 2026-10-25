@@ -9,9 +9,14 @@ import { DEVICE_EXPLOITED, DEVICE_HEALTHY } from '@prevent/contracts';
 import type { DeviceStatus } from '@prevent/contracts';
 import { createBackend as createRealtimeBackend } from '@prevent/realtime/backend';
 
+/** The device_status row minus server-managed fields (the updateDeviceStatus reducer input). */
+export type DeviceStatusUpdate = Omit<DeviceStatus, 'id' | 'updatedAt'>;
+
 export interface BridgeBackend {
   /** Calls cb immediately with the current row (if any) and on every update. Returns unsubscribe. */
   subscribeDeviceStatus(cb: (row: DeviceStatus) => void): () => void;
+  /** WRITE the device_status row — the hardware reporting its real state (role `device`). */
+  updateDeviceStatus(row: DeviceStatusUpdate): Promise<void>;
   /** Calls the pushIrEvent reducer (orchestrator consumes it and fires the exploit). */
   pushIrEvent(code: number): Promise<void>;
   close(): void;
@@ -36,6 +41,10 @@ export function createMockBackend(intervalMs = 5000): BridgeBackend {
       return () => {
         listeners.delete(cb);
       };
+    },
+    async updateDeviceStatus(row) {
+      current = { ...current, ...row, updatedAt: Date.now() };
+      for (const cb of listeners) cb(current);
     },
     async pushIrEvent(code) {
       console.log(`[mock] pushIrEvent(code=${code})`);
@@ -73,6 +82,7 @@ export async function createSpacetimeBackend(): Promise<BridgeBackend> {
     // Reading device_status is anonymous/public; pushIrEvent calls a role-`bridge` reducer, so it
     // only lands if this process holds a granted identity (set SPACETIMEDB_TOKEN). index.ts already
     // logs and swallows a rejection, so leaving it unauthorized degrades gracefully.
+    updateDeviceStatus: (row) => rt.updateDeviceStatus(row),
     pushIrEvent: (code) => rt.pushIrEvent(code),
     close: () => rt.disconnect(),
   };

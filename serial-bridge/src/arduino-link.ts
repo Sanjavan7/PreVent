@@ -19,6 +19,8 @@ export interface ArduinoLinkOptions {
   onIr: (code: number) => void;
   /** Called every time the board announces READY (including after a reset/replug). */
   onReady?: () => void;
+  /** Called on every telemetry status line the firmware emits (the device's real state). */
+  onTelemetry?: (t: { fan: number; alarm: boolean; compromised: boolean }) => void;
   onLog?: (msg: string) => void;
 }
 
@@ -140,6 +142,9 @@ export class ArduinoLink {
         break; // lastRx already refreshed
       case 'IR':
         this.opts.onIr(msg.code);
+        break;
+      case 'telemetry':
+        this.opts.onTelemetry?.({ fan: msg.fan, alarm: msg.alarm, compromised: msg.compromised });
         break;
       case 'unknown':
         if (msg.raw) this.log(`unknown line: ${msg.raw}`);
