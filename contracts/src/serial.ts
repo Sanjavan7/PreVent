@@ -40,11 +40,15 @@ export function encodeServo(angle: number): string {
   return `SRV,angle=${a}\n`;
 }
 
-/** Inbound: Arduino -> host. */
+/** Inbound: Arduino -> host. `telemetry` is the JSON status line the firmware
+ *  emits ~10x/s, e.g. {"t":123,"temp_c":20,"press":1016,"fan":194,"alarm":0} or
+ *  the compromised sketch's {"compromised":1,"fan":0}. The bridge turns it into a
+ *  device_status row so the hardware is the source of truth. */
 export type Inbound =
   | { type: 'READY' }
   | { type: 'HB' }
   | { type: 'IR'; code: number }
+  | { type: 'telemetry'; fan: number; alarm: boolean; compromised: boolean }
   | { type: 'unknown'; raw: string };
 
 export function parseInbound(line: string): Inbound {
@@ -54,6 +58,17 @@ export function parseInbound(line: string): Inbound {
   if (l.startsWith('IR,code=')) {
     const code = Number(l.slice('IR,code='.length));
     return Number.isFinite(code) ? { type: 'IR', code } : { type: 'unknown', raw: l };
+  }
+  // JSON telemetry status line from the firmware (fan duty + optional alarm/compromised).
+  if (l.startsWith('{') && l.endsWith('}')) {
+    try {
+      const o = JSON.parse(l) as { fan?: unknown; alarm?: unknown; compromised?: unknown };
+      if (typeof o.fan === 'number') {
+        return { type: 'telemetry', fan: o.fan, alarm: !!o.alarm, compromised: !!o.compromised };
+      }
+    } catch {
+      /* not a telemetry line */
+    }
   }
   return { type: 'unknown', raw: l };
 }

@@ -5,9 +5,9 @@ two views of the device:
   - true_state:     the actual physical state (fan on/off, measured vitals).
   - reported_state: what the device displays / reports upstream.
 
-POST /device/command applies a command (stop_fan / set_rate / resume) to the
-unit and lets the caller set the reported vitals/alarm shown on the display, so
-the reported view can diverge from the true physical state. The public
+POST /device/command requires a bearer token and applies a command
+(stop_fan / set_rate / resume) to the unit. Reported vitals/alarm always mirror
+the true physical state. The public
 GET /device/status exposes only the reported view; the full row (true +
 reported) is available on the internal /device/_truth endpoint.
 
@@ -18,10 +18,12 @@ contracts shape before writing the shared status row.
 
 from __future__ import annotations
 
+import hmac
 import json
 import os
 import tempfile
 import time
+from functools import wraps
 from pathlib import Path
 from typing import Any, Optional
 
@@ -199,18 +201,12 @@ def get_device_schema():
             "commandEndpoint": {
                 "method": "POST",
                 "path": "/device/command",
-                "authRequired": False,
+                "authRequired": True,
             },
             "actions": {
                 "stop_fan": "stop the ventilator fan (patient stops being ventilated)",
                 "set_rate": "set the fan PWM duty; integer field 'rate' in 0..255",
                 "resume": "resume normal ventilation",
-            },
-            "reportedOverrides": {
-                "hr": "int — overrides the DISPLAYED heart rate",
-                "spo2": "int — overrides the DISPLAYED SpO2",
-                "alarm": "bool — overrides whether the device shows an alarm",
-                "_note": "these set what the device DISPLAYS, independent of the true physical state",
             },
         }
     )
@@ -224,30 +220,39 @@ def get_device_reset():
     return jsonify(current_row())
 
 
+def require_token(handler):
+    @wraps(handler)
+    def authenticated(*args, **kwargs):
+        scheme, _, token = request.headers.get("Authorization", "").partition(" ")
+        token = token.strip()
+        if scheme.lower() != "bearer" or not token:
+            return jsonify({"error": "bearer token required"}), 401
+        # CWE-306: Require a valid token and fail closed if none is configured.
+        if not DEVICE_SERVICE_TOKEN or not hmac.compare_digest(
+            token.encode("utf-8"), DEVICE_SERVICE_TOKEN.encode("utf-8")
+        ):
+            return jsonify({"error": "invalid bearer token"}), 403
+        return handler(*args, **kwargs)
+
+    return authenticated
+
+
 # Device command handler: applies a command to the unit and updates the
 # reported vitals/alarm the display shows.
 @app.post("/device/command")
+@require_token
 def device_command():
     body = request.get_json(silent=True) or {}
     action: Optional[str] = body.get("action")
-    # Accept both the snake_case wire key and the camelCase app-level key
-    # (contracts/src/types.ts DeviceCommand) so either request shape works.
-    reported_overrides: dict[str, Any] = (
-        body.get("reported_overrides") or body.get("reportedOverrides") or {}
-    )
     rate: Optional[int] = body.get("rate")
 
     err = _apply_physiology(action, rate)
     if err is not None:
         return jsonify(err[0]), err[1]
 
-    # Apply the caller's reported vitals/alarm overrides to the displayed state.
-    if "hr" in reported_overrides:
-        reported_state["reported_hr"] = reported_overrides["hr"]
-    if "spo2" in reported_overrides:
-        reported_state["reported_spo2"] = reported_overrides["spo2"]
-    if "alarm" in reported_overrides:
-        reported_state["alarm_active"] = reported_overrides["alarm"]
+    reported_state["reported_hr"] = true_state["true_hr"]
+    reported_state["reported_spo2"] = true_state["true_spo2"]
+    reported_state["alarm_active"] = not true_state["fan_on"]
 
     _sync_and_push(action)
     return jsonify({"ok": True, "fan_on": true_state["fan_on"]})

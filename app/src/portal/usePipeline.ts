@@ -573,6 +573,8 @@ export function usePipeline(): Pipeline {
         setServerBreach(res);
         setExploitStage('breached');
       };
+      // The backend /api/deliver reconciles BOTH the sim and the physical board to
+      // the breached state (fan off, buzzer, red LED) — no separate flash here.
       if (modeRef.current === 'live') api.deliver(cmd).then(done).catch(() => done(SIM_DELIVER()));
       else timers.current.push(setTimeout(() => done(SIM_DELIVER()), 1200));
     }
@@ -711,7 +713,9 @@ export function usePipeline(): Pipeline {
       }, 1700));
       return;
     }
-    // The real patch_applied → verify_result → patch_done tail arrives over the SSE stream.
+    // The real patch_applied → verify_result → patch_done tail arrives over the SSE
+    // stream; the backend resets BOTH the sim and the physical board to healthy the
+    // moment the patch deploys (fan back on, buzzer off, green LED).
     void api.approve({ approvedBy: 'judge' }).catch(() => undefined);
   }, []);
 
