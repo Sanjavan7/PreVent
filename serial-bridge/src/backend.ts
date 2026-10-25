@@ -7,6 +7,7 @@
 
 import { DEVICE_EXPLOITED, DEVICE_HEALTHY } from '@prevent/contracts';
 import type { DeviceStatus } from '@prevent/contracts';
+import { createBackend as createRealtimeBackend } from '@prevent/realtime/backend';
 
 export interface BridgeBackend {
   /** Calls cb immediately with the current row (if any) and on every update. Returns unsubscribe. */
@@ -46,16 +47,39 @@ export function createMockBackend(intervalMs = 5000): BridgeBackend {
   };
 }
 
-/** Live path: SpacetimeDB (spacetimedb@2.13.0) subscription on device_status + pushIrEvent reducer. */
-export function createSpacetimeBackend(): BridgeBackend {
-  // TODO(dev): connect with the generated module bindings from realtime/ using
-  // process.env.SPACETIMEDB_URI / SPACETIMEDB_MODULE (see .env.example):
-  //   - subscribe to `SELECT * FROM device_status`; map row -> DeviceStatus
-  //     (call cb on onInsert and onUpdate)
-  //   - pushIrEvent(code) -> conn.reducers.pushIrEvent({ code })
-  throw new Error('SpacetimeDB backend not wired yet (TODO(dev)); run with BRIDGE_MODE=mock');
+/**
+ * Live path: subscribe to the single device_status row on SpacetimeDB (Maincloud or local)
+ * via the already-built shared client (@prevent/realtime SpacetimeBackend). That client owns the
+ * connection, the generated-bindings row -> DeviceStatus mapping, and automatic reconnect; here we
+ * only adapt its RealtimeBackend surface down to the two methods the bridge needs.
+ *
+ * Config comes from process.env (the realtime factory reads these keys):
+ *   VITE_SPACETIMEDB_URI    e.g. wss://maincloud.spacetimedb.com (shared) or ws://localhost:3000
+ *   VITE_SPACETIMEDB_MODULE e.g. prevent
+ *   SPACETIMEDB_TOKEN       optional; only needed to keep a stable identity for pushIrEvent (role `bridge`)
+ */
+export async function createSpacetimeBackend(): Promise<BridgeBackend> {
+  const rt = await createRealtimeBackend('spacetimedb', process.env);
+  await rt.connect(); // resolves once the initial subscription snapshot is applied
+  return {
+    subscribeDeviceStatus(cb) {
+      // SpacetimeBackend replays the current snapshot immediately, then fires on every update.
+      // device_status is a single-row table (id=1), so the row is rows[0].
+      return rt.subscribe('device_status', (rows) => {
+        const row = rows[0];
+        if (row) cb(row);
+      });
+    },
+    // Reading device_status is anonymous/public; pushIrEvent calls a role-`bridge` reducer, so it
+    // only lands if this process holds a granted identity (set SPACETIMEDB_TOKEN). index.ts already
+    // logs and swallows a rejection, so leaving it unauthorized degrades gracefully.
+    pushIrEvent: (code) => rt.pushIrEvent(code),
+    close: () => rt.disconnect(),
+  };
 }
 
-export function createBackend(): BridgeBackend {
-  return process.env.BRIDGE_MODE === 'live' ? createSpacetimeBackend() : createMockBackend();
+export function createBackend(): Promise<BridgeBackend> {
+  return process.env.BRIDGE_MODE === 'live'
+    ? createSpacetimeBackend()
+    : Promise.resolve(createMockBackend());
 }
