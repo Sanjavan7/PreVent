@@ -286,6 +286,14 @@ body {
     opacity var(--dur-micro) var(--ease-state);
 }
 
+/* ---------- Landing hero: ECG monitor sweep, flaw pulse, floating tags ---------- */
+@keyframes ecg-sweep { from { stroke-dashoffset: 116; } to { stroke-dashoffset: 0; } }
+.ecg-sweep { stroke-dasharray: 16 100; animation: ecg-sweep 2.8s linear infinite; }
+@keyframes flaw-pulse { 0%, 100% { opacity: 0.45; r: 3; } 50% { opacity: 1; r: 5; } }
+.flaw-pulse { animation: flaw-pulse 1.4s ease-in-out infinite; }
+@keyframes float-tag { 0%, 100% { transform: translateY(0); opacity: 0.85; } 50% { transform: translateY(-5px); opacity: 1; } }
+.float-tag { animation: float-tag 4.5s ease-in-out infinite; }
+
 @media (prefers-reduced-motion: reduce) {
   .spinner { animation: none; border-top-color: var(--color-border-strong); }
   .state-transition { transition-duration: 0.01ms; }
@@ -295,6 +303,7 @@ body {
   .animate-enter { animation: none; }
   .beacon-core, .beacon-ping { animation: none; }
   .graph-edge-active { animation: none; }
+  .ecg-sweep, .flaw-pulse, .float-tag { animation: none; }
 }
 
 /* ---------- react-diff-view: de-animated, two-color, only inside a disclosure ---------- */
