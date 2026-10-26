@@ -4,7 +4,8 @@
 # PreVent — autonomous medical-device security agent (ASI:One)
 
 **Agent name:** `PreVent-Security`
-**Agent address:** `agent1q262xtnu6x34gzaqllt5d0xrvkah2f23fltqeptwg8sshxthcyd6zxru0tv`
+**Agent address:** derived deterministically from your `AGENT_SEED` (printed in the
+logs on startup as `agent1q…`). Set a unique seed per deployment; never commit it.
 
 Find → **prove** → (human-approved) **fix** → **re-verify**, entirely inside one ASI:One
 conversation. PreVent grounds on a real CVE, runs real SAST (SemGrep + Bandit) and
@@ -24,7 +25,7 @@ pre-market submission.
 > testing against our own sandboxed service.
 
 ## Try it in ASI:One
-Ask the agent (discoverable via ASI:One, or @mention its address):
+Ask the agent (discoverable via ASI:One, or @mention its address once deployed):
 
 > **"Audit our device-service for missing-authentication flaws and prove whether it's exploitable."**
 

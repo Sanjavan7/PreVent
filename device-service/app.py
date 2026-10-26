@@ -114,7 +114,7 @@ def current_row() -> dict[str, Any]:
 
 def push_device_status() -> dict[str, Any]:
     """Publish the single source-of-truth DeviceStatus row so the dashboard,
-    the patient sim, and the serial bridge/emulator all react to one row.
+    the patient sim, and any serial consumer all react to one row.
 
     In production this is the `updateDeviceStatus(...)` reducer. Here it writes
     the row atomically to PREVENT_DEVICE_ROW_FILE (if set) and always logs it,

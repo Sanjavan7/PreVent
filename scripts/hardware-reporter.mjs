@@ -2,8 +2,8 @@
 // scripts/hardware-reporter.mjs
 //
 // Read UNO serial output, detect fan state, write to the Maincloud `device_status`
-// row when the fan state changes. This flips the architecture direction compared to
-// the serial-bridge: here the HARDWARE is the source of truth, and Maincloud follows.
+// row when the fan state changes. Here the HARDWARE is the source of truth and the
+// shared DB follows (the opposite direction from a DB-drives-the-board bridge).
 //
 // Fan running (reported from UNO)  → write {fan_on=true, compromised=false, status="healthy"}
 // Fan stopped / UNO silent >3s      → write {fan_on=false, compromised=true, status="hardware-silence"}

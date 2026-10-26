@@ -174,7 +174,7 @@ export class MockSecurityStages implements SecurityStages {
 }
 
 /** The envelope every `stage_api` call emits on stdout (one JSON object). See
- * security/stage_api.py and docs/DEV2-SECURITY-DECISIONS.md §4. */
+ * security/stage_api.py and docs/ARCHITECTURE.md. */
 interface StageApiEnvelope {
   stage: string;
   ok: boolean;
@@ -221,9 +221,9 @@ function toNewFinding(raw: Record<string, unknown>): NewFinding {
 }
 
 /**
- * REAL path: drives DEV2's single subprocess bridge `python -m
- * security.stage_api <stage>` (the agreed seam — docs/DEV2-SECURITY-DECISIONS.md
- * §4). Each call emits ONE JSON envelope `{stage, ok, data, events}` on stdout;
+ * REAL path: drives the security engine's single subprocess bridge `python -m
+ * security.stage_api <stage>` (the seam — docs/ARCHITECTURE.md). Each call emits
+ * ONE JSON envelope `{stage, ok, data, events}` on stdout;
  * `data` is a superset of each seam result shape. EVERY method try/catch
  * delegates to a private MockSecurityStages on ANY genuine failure (no Python,
  * no interpreter, unparseable output) so a broken Python side degrades

@@ -107,8 +107,8 @@ def payload_for_ir_code(code: int) -> Payload:
 
 def on_ir_event(code: int, *, base_url: str = DEVICE_SERVICE_URL) -> DeliverResult:
     """Handler for an `ir_events` row pushed by the serial bridge
-    (judge pressed the remote). TODO(dev): wire this up to the real
-    `ir_events` subscription (SpacetimeDB/Convex, owned by Dev 1/Dev 3) --
+    (someone pressed the remote). TODO: wire this up to the real
+    `ir_events` subscription (the realtime layer's SpacetimeDB) --
     right now it's just the pure code -> payload -> delivery path, called
     directly with a code for dev/testing."""
     payload = payload_for_ir_code(code)

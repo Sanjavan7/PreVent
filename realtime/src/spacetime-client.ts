@@ -1,5 +1,5 @@
 // SpacetimeDB-specific exports for the app's React provider + hooks.
-// Isolated from backend/index.ts so that `mock` and `convex` consumers do NOT eagerly
+// Isolated from backend/index.ts so that `mock` consumers do NOT eagerly
 // load the generated module_bindings.
 //
 // Usage (app/src/main.tsx):

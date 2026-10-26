@@ -16,7 +16,7 @@
  *
  * Libraries: LiquidCrystal, Servo (bundled); IRremote v4 (Library Manager).
  *
- * PIN MAP (conflict-free; see plans/PLAN-HW-arduino.md):
+ * PIN MAP (conflict-free):
  *   D0/D1  USB serial (do not use)
  *   D2     IR receiver OUT                  (IRremote receive pin)
  *   D3     74HC595 ST_CP (latch)            (digital only: Timer2 PWM unused)

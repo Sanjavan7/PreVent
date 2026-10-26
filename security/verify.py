@@ -35,7 +35,7 @@ STATUS_PATH = "/device/status"
 
 # Mirrors contracts/src/mocks.ts `DEVICE_HEALTHY` -- the dev-mode stand-in
 # "source of truth" row used until the real shared `device_status`
-# table/reducer (Dev 1/Dev 3, SpacetimeDB or Convex) is wired up.
+# table/reducer (the realtime layer's SpacetimeDB) is wired up.
 DEVICE_HEALTHY_MOCK = {
     "id": 1,
     "fanOn": True,
