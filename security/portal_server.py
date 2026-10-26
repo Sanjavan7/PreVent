@@ -870,13 +870,14 @@ def _free_device_port() -> int:
         return s.getsockname()[1]
 
 
-def _device() -> DeviceService:
+def _device(patched: bool = False) -> DeviceService:
     """Lazily create the device-service singleton (temp row file + log dir) and
-    (re)start it, returning the running service. DeviceService.start() stops any
-    prior process first, so this both launches the service cold and relaunches
-    it from the CURRENT app.py bytes on disk — the committed vulnerable handler
-    on a clean checkout, or Droid's edited bytes after an approved patch.
-    Patched-ness is a property of the file bytes, not a launch flag."""
+    (re)start it in the requested build, returning the running service.
+    DeviceService.start() stops any prior process first, so this launches the
+    service cold and relaunches it between stages: vulnerable for DELIVER, patched
+    for the post-approval VERIFY. The patch stage also edits app.py for real (the
+    Droid diff shown in the UI); the build flag makes VERIFY deterministic whether
+    or not that on-disk edit applied."""
     global _SVC, _SVC_TMPDIR
     with _SVC_LOCK:
         if _SVC is None:
@@ -886,7 +887,7 @@ def _device() -> DeviceService:
                 row_file=_SVC_TMPDIR / "device_row.json",
                 log_dir=_SVC_TMPDIR,
             )
-        _SVC.start()
+        _SVC.start(patched=patched)
         return _SVC
 
 
@@ -1211,7 +1212,7 @@ def _patch_stream():
         # Patch deployed -> reset BOTH the sim and the physical board to healthy,
         # regardless of the verify outcome (fan back on, buzzer off, green LED).
         _apply_state("healthy")
-        svc = _device()
+        svc = _device(patched=True)
         yield _sse(
             {
                 "type": "patch_applied",

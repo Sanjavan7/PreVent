@@ -101,30 +101,29 @@ def _events(resp) -> list[dict]:
 
 
 def test_exploit_stream_single_finding(seeded_scan):
-    """?finding=1 authors ONLY finding 1: one author lifecycle + authors_done
-    count 1, so the UI can run the server stage on its own."""
+    """?finding=1 authors ONLY finding 1: one agent lifecycle + all_done count 1,
+    so the UI can run the server stage on its own."""
     resp = app.test_client().get("/api/exploit/stream", query_string={"finding": 1})
     assert resp.status_code == 200
     events = _events(resp)
 
-    finished = [e for e in events if e["type"] == "author_finished"]
-    assert len(finished) == 1
-    assert finished[0]["findingId"] == 1
+    spawned = [e for e in events if e["type"] == "agent_spawned"]
+    assert len(spawned) == 1 and spawned[0]["findingId"] == 1
 
-    started = [e for e in events if e["type"] == "author_started"]
-    assert len(started) == 1
-    assert started[0]["findingId"] == 1
+    done = [e for e in events if e["type"] == "agent_done"]
+    assert len(done) == 1 and done[0]["findingId"] == 1
 
-    done = [e for e in events if e["type"] == "authors_done"]
-    assert len(done) == 1
-    assert done[0]["count"] == 1
+    all_done = [e for e in events if e["type"] == "all_done"]
+    assert len(all_done) == 1 and all_done[0]["count"] == 1
 
 
-def test_exploit_stream_no_param_authors_both(seeded_scan):
-    """With no ?finding the stream behaves exactly as before: both exploitable
-    findings authored, authors_done count 2."""
+def test_exploit_stream_no_param_authors_all(seeded_scan):
+    """With no ?finding every scanner finding gets a conversation; the two semgrep
+    control-path findings (ids 1 + 3) are the ones judged exploitable."""
     events = _events(app.test_client().get("/api/exploit/stream"))
-    finished = [e for e in events if e["type"] == "author_finished"]
-    assert {e["findingId"] for e in finished} == {1, 3}
-    done = [e for e in events if e["type"] == "authors_done"]
-    assert len(done) == 1 and done[0]["count"] == 2
+    spawned = [e for e in events if e["type"] == "agent_spawned"]
+    assert {e["findingId"] for e in spawned} == {1, 2, 3, 4}
+    payloads = [e for e in events if e["type"] == "payload"]
+    assert {e["findingId"] for e in payloads} == {1, 3}
+    all_done = [e for e in events if e["type"] == "all_done"]
+    assert len(all_done) == 1 and all_done[0]["count"] == 4

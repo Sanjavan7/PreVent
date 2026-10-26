@@ -63,11 +63,12 @@ def test_attack_tail_end_to_end(portal_client):
     assert delivered["reported"]["hr"] != delivered["true"]["hr"]
     assert isinstance(delivered["impact"], str) and delivered["impact"]
 
-    # 2) PATCH — deploy the bearer-auth reference handler (Factory Droid stand-in).
-    patched = _post(portal_client, "/api/patch")
-    assert patched["applied"] is True
-    assert patched["diffRef"]
-    assert patched["droid"]
+    # 2) PATCH — in the live portal the Factory Droid writer/reviewer stream and a
+    #    human APPROVE gate deploy the fix (see /api/patch/stream + /api/approve,
+    #    which spawn a Node runner). Here we bring up the patched build directly —
+    #    the same bytes an approved gate deploys — so the attack tail is exercised
+    #    hermetically without the Node toolchain.
+    portal_server._device(patched=True)
 
     # 3) VERIFY — re-send the byte-identical exploit at the patched service; it
     #    must now be blocked (401/403) with true_state intact and no lie applied.
@@ -77,5 +78,7 @@ def test_attack_tail_end_to_end(portal_client):
     assert verified["true"]["fanOn"] is True
 
     # 4) RESTORE — flip back to the clean, pre-patch vulnerable + healthy state.
+    #    (git-reverts device-service to its committed bytes, so run from a clean
+    #    tree.)
     restored = _post(portal_client, "/api/restore")
     assert restored["ok"] is True
