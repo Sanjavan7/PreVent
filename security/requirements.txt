@@ -1,5 +1,4 @@
-# PreVent security package (Dev 2) -- Python 3.11-3.13
-# (plans/PLAN-DEV2-security-verification.md: install under 3.10-3.14, NOT 3.15)
+# PreVent security package -- Python 3.11-3.13 (install under 3.10-3.14, NOT 3.15)
 
 requests>=2.31,<3
 

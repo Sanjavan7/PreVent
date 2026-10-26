@@ -1,6 +1,7 @@
 # Project Brief: Autonomous Medical-Device Security Pipeline
 
-**Working name:** TBD (pick one before building). **Event:** Cal Hacks 13.0, Oct 23-25, 2026. **Team:** 4 people.
+_The product and problem brief behind PreVent. For how the built system fits
+together, see [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)._
 
 ---
 
@@ -16,7 +17,7 @@ Ransomware is doing measurable, deadly harm to hospitals, and the attack surface
 
 It is framed as a pre-market and development-pipeline tool: a device maker runs it against a device's software before the device ships, or in staging, to find and fix vulnerabilities while a human signs off. It is explicitly not a tool that auto-patches live devices attached to patients.
 
-The demonstration runs on real but harmless hardware: a small networked device (Raspberry Pi Pico 2 W) that stands in for a medical device, driving a fan-and-mask "ventilator" prop with a vitals display. When the exploit compromises the device's software, the hardware visibly reacts. When the verified patch is applied, it recovers. Nothing is scripted; the hardware reacts to the real state of the real software. The demo is shown as a split screen: on the left, a hospital/patient view where the judge is the patient; on the right, the full agent and security pipeline working in real time.
+The demonstration runs on real but harmless hardware: a small networked device that stands in for a medical device, driving a fan-and-mask "ventilator" prop with a vitals display. When the exploit compromises the device's software, the hardware visibly reacts. When the verified patch is applied, it recovers. Nothing is scripted; the hardware reacts to the real state of the real software. The demo is shown as a split screen: on the left, a hospital/patient view; on the right, the full agent and security pipeline working in real time.
 
 The whole loop is: ground the vulnerability in a real CVE, scan, generate a proof-of-concept exploit, deliver it (the device is compromised), write a patch, verify the patch closes the exact exploit, restore the device. A live dashboard shows every agent's reasoning and artifacts as it happens.
 
@@ -38,7 +39,7 @@ The whole loop is: ground the vulnerability in a real CVE, scan, generate a proo
 
 **The chain to state plainly, without overclaiming:** unpatched devices widen the attack surface → ransomware gets in and spreads → care is disrupted → patients are harmed. Two honesty points the pitch must respect:
 - Medical devices are **not** the most common initial entry point for ransomware (phishing, stolen credentials, and exposed services such as the no-MFA Citrix login at Change Healthcare are more common). Devices are the unpatchable surface attackers pivot through and persist on once inside. Frame them that way, not as "how ransomware always gets in."
-- There is **no publicly confirmed patient death caused by a medical-device hack**. The documented deaths come from ransomware disrupting care broadly. The mortality and outcome figures above are about hospital attacks (mostly ransomware hitting IT), not device compromise specifically. Say so; overclaiming a device-hack death is false and easy for a knowledgeable judge to puncture.
+- There is **no publicly confirmed patient death caused by a medical-device hack**. The documented deaths come from ransomware disrupting care broadly. The mortality and outcome figures above are about hospital attacks (mostly ransomware hitting IT), not device compromise specifically. Say so; overclaiming a device-hack death is false and easy for a knowledgeable reviewer to puncture.
 
 **Why the fix has to happen before deployment or in staging:** because a change to a cleared device can require a new FDA submission, and because patching live clinical devices can require downtime or physician supervision, the right place to find and fix these vulnerabilities is before a device ships or in the maker's development pipeline, with a human in control, not pushed automatically to a device in use.
 
@@ -86,7 +87,7 @@ A human approves before the patch is treated as final, and the system refuses to
 
 ## 5. Framing and safety boundaries (critical, do not drift from these)
 
-These boundaries are what make the project credible to security and medical judges and what keep it responsible. The implementation must honor them.
+These boundaries are what make the project credible to security and medical reviewers and what keep it responsible. The implementation must honor them.
 
 - **Pre-market / staging only.** The system operates on device software in development or before shipping, producing a fix for human approval. It does not auto-patch live devices in clinical use. Auto-patching a running medical device is exactly the reckless thing real regulation prevents.
 - **Sandbox only.** All exploitation happens against the team's own deliberately vulnerable target, in an isolated environment. The system must be built so it cannot act against anything outside that sandbox, and it should visibly refuse if asked to.
@@ -139,7 +140,7 @@ Each agent's responsibility, what it takes in, and what it produces. Implementat
 - **Verifier (deterministic, not AI).** Re-runs the exact same exploit against the patched software. Output: the exploit now fails (or it does not, in which case the loop goes back to the patch agent). This is the proof.
 - **Restore.** Redeploys the patched software; the device recovers; the device-status row flips back to healthy.
 
-The reactive property matters: the loop must handle a vulnerability it was not pre-fed in the demo (for example, a judge choosing the payload, or a second bug introduced live), because that is what proves it is a real system and not a scripted sequence.
+The reactive property matters: the loop must handle a vulnerability it was not pre-fed in the demo (for example, an operator choosing the payload, or a second bug introduced live), because that is what proves it is a real system and not a scripted sequence.
 
 ---
 
@@ -167,11 +168,11 @@ The hardware's role is to make the stakes legible and emotional and to qualify f
 
 The demo is presented as one split screen, both halves driven by the same real shared state, so the physical device and both panels always agree.
 
-**Left panel: the hospital and patient.** An immersive hospital view (built in the same web app, 2D or 3D) showing the patient in a room with live vitals, set inside a hospital floor or building so the viewer sees this is one device among thousands. The judge is the patient: they wear or hold the mask, and this panel is the ground truth of what is really happening to them. When the device is compromised, this panel shows the patient truly crashing, while the device itself keeps reporting normal (the lie, see section 4), which is the chilling contrast. Optionally, the compromise can be shown spreading to neighboring devices (the MEDJACK and ransomware-spread story), then contained and healed by the fix. This panel carries the human stakes for the overall and People-First judges.
+**Left panel: the hospital and patient.** An immersive hospital view (built in the same web app, 2D or 3D) showing the patient in a room with live vitals, set inside a hospital floor or building so the viewer sees this is one device among thousands — the ground truth of what is really happening to the patient. When the device is compromised, this panel shows the patient truly crashing, while the device itself keeps reporting normal (the lie, see section 4), which is the chilling contrast. Optionally, the compromise can be shown spreading to neighboring devices (the MEDJACK and ransomware-spread story), then contained and healed by the fix. This panel carries the human stakes.
 
-**Right panel: the pipeline.** The full agent and security dashboard (section below): every agent's current step and reasoning, and the real security artifacts as they are produced. This is the depth-and-complexity showcase for the technical judges.
+**Right panel: the pipeline.** The full agent and security dashboard (section below): every agent's current step and reasoning, and the real security artifacts as they are produced. This is the depth-and-complexity showcase.
 
-**Build order (this is sequencing, not a limit on ambition).** The immersive hospital simulation is a committed, first-class part of this project, owned by a dedicated person from the start and built in parallel with the pipeline. It is a real asset for the overall and main prize, where judges reward a striking, legible, creative demo. The one rule is order of operations: the core find-exploit-patch-verify loop must reach demo-ready before the sim is polished, because the live exploit is the one thing that cannot be faked and must never be the component that breaks on stage. The physical device and the simulation reinforce each other: the judge is the patient, the hardware is what they feel, and the simulation is what the whole room sees.
+**Build order.** The core find-exploit-patch-verify loop must reach a working state before the simulation is polished, because the live exploit is the one thing that cannot be faked. The physical device and the simulation reinforce each other: the hardware is the physical stakes, and the simulation is the system-level view.
 
 ---
 
@@ -187,24 +188,18 @@ This view also carries the sponsor goals at once: it shows the reasoning model's
 
 ---
 
-## 11. Tech stack and sponsor roles
+## 11. Tech stack
 
-The confirmed stack and what each piece does. Prizes and exact criteria come from the event's internal guide and must be confirmed at each booth; every company below is a confirmed sponsor.
+The stack and what each piece does.
 
 **Load-bearing:**
 - **Claude (Anthropic)** is the reasoning core across the loop: choosing the real finding, planning the exploit, judging outcomes, and triaging verification. Its safety behavior (reasoning about blast radius, refusing to act outside the sandbox, surfacing uncertainty before the patch is final) is a visible, first-class part of the system, not a disclaimer.
 - **Factory Droid SDK** is the patch agent: invoked by the orchestrator (not a human), it does real repository work, streams its plan and diff to the dashboard, and is scoped so it cannot leave the repository.
-- **SpacetimeDB** is the coordination and observability layer: the one shared real-time database all agents write to, and that both panels subscribe to, with the device's status as a row. (Risk note: its modules are Rust/C# and take real setup time. Convex is the faster-to-build fallback if SpacetimeDB is not working by roughly the one-third mark of the build. Decide whether to keep that fallback ready.)
-- **Armadin** is not an integration but the security track this is aimed at; the whole verified find-exploit-fix loop is their thesis, and "verified exploit" to them means demonstrated real impact, then proven closed.
+- **SpacetimeDB** is the coordination and observability layer: the one shared real-time database all agents write to, and that both panels subscribe to, with the device's status as a row. A keyless `mock` backend stands in for fully offline development.
+- **An open model for exploit generation** (`DeepSeek-V4.1-Flash`, served via Bitdeer, with Featherless as a standby) writes the proof-of-concept — kept as a separate trust domain from the decision model (Claude never writes exploit code).
 
 **Committed, lighter:**
-- **Free NVD/CVE data** grounds the planted vulnerability in a real published advisory (no sponsor dependency).
-
-**Open decision:** the exploit-generation step needs a model. Either **Bitdeer** (an open model via an OpenAI-compatible endpoint, near-zero setup, and it will write the proof-of-concept without hedging) or Claude itself (simpler, but it may hedge on exploit code and loses the open-model angle). Recommended: Bitdeer. Decide before building, because it determines who writes stage 3.
-
-**Qualify without extra building:** Microsoft "Built for the Real World" (confirmed to need no Azure; it is the career target, won by being production-minded with a real path to production and responsible design), plus the overall Best Hardware, Best People-First Social Impact, and Most Technically Advanced prizes.
-
-**Dropped:** Greptile (no prize track, so the separate code-review step is cut; the Droid still shows a visible diff), RunPod (redundant with the exploit-model host), Elastic (would require rebuilding agents in their framework), Bright Data (redundant with NVD), Cartesia (no voice in this project).
+- **Free NVD/CVE data** grounds the modeled vulnerability in a real published advisory (no external dependency).
 
 ---
 
@@ -214,11 +209,11 @@ The implementation must support this sequence running live, across the split scr
 
 1. The device is alive: fan running, vitals steady, green light; on the left the patient is stable; on the right the agents are idle. State the framing line (pre-market pipeline, human sign-off).
 2. The scan runs and the reasoning agent picks the real vulnerability out of the noise, citing the real CVE it is modeled on.
-3. The exploit fires, ideally on a payload a judge chooses, achieving a real effect; the device is compromised; the ventilator stops while the device keeps reporting normal (the lie), and the left panel shows the patient truly crashing.
+3. The exploit fires, ideally on a chosen or newly introduced payload, achieving a real effect; the device is compromised; the ventilator stops while the device keeps reporting normal (the lie), and the left panel shows the patient truly crashing.
 4. The patch agent writes the fix, its plan and diff streaming onto the right panel, visibly unable to leave the repository.
 5. The reasoning agent surfaces its uncertainty and waits for a human OK (the sign-off).
 6. The same exploit is re-run and now fails; the device recovers; the patient recovers.
-7. The loop can be run again cold, on a new or judge-chosen input, to prove it is reactive and not scripted.
+7. The loop can be run again cold, on a new input, to prove it is reactive and not scripted.
 
 Optional, to make the ransomware center literal: show the exploited device being used as the foothold, with a ransom lock or message appearing, and in the fixed run the closed vulnerability blocks it so the lock never happens. Only add this once the core loop is solid, and keep the honesty framing (the device is the way in, not the whole attack).
 
@@ -231,7 +226,7 @@ The implementation must also produce a backup recording of this full sequence, b
 The build is successful when:
 - the full loop runs end to end, live, on real hardware, reliably enough to repeat on demand;
 - the exploit demonstrably achieves a real effect (control or data integrity), not just a crash, and the verifier proves the same exploit fails after the patch;
-- the loop works on an input the team did not pre-stage (judge-chosen or newly introduced);
+- the loop works on an input that was not pre-staged (operator-chosen or newly introduced);
 - the right panel shows every agent's reasoning and the real artifacts, including at least one caught mistake;
 - the left panel reflects the real device state, so the physical device and both screens always agree;
 - the patch agent's work is genuinely autonomous and visibly scoped, and a human approval gates the result;
@@ -249,21 +244,21 @@ The build is successful when:
 
 ---
 
-## 15. Open decisions to settle before building
+## 15. Decisions (as built)
 
-1. The exploit-generation model host (Bitdeer vs Claude; recommended Bitdeer).
-2. Whether to keep a Convex fallback ready in case SpacetimeDB's Rust setup stalls (recommended yes).
-3. Who owns the simulation (it needs a dedicated person building it in parallel from the start), and whether it is 2D or 3D.
-4. The project name.
+1. Exploit-generation model host: an open DeepSeek model via Bitdeer (Featherless standby), kept separate from the decision model.
+2. Realtime backend: SpacetimeDB, with a keyless `mock` backend for offline development.
+3. The simulation ships as a 3D hospital view alongside the dashboard.
+4. Project name: PreVent.
 
 ---
 
 ## 16. Key risks
 
-- **The exploit being a mere crash, or the vulnerability being obviously planted.** Mitigation: achieve a real control/integrity effect, model it on a real CVE (the missing-authentication class, CVE-2019-6538), and support a judge-chosen or newly introduced input.
+- **The exploit being a mere crash, or the vulnerability being obviously planted.** Mitigation: achieve a real control/integrity effect, model it on a real CVE (the missing-authentication class, CVE-2019-6538), and support an operator-chosen or newly introduced input.
 - **AI patch unreliability** (the 26% figure). Mitigation: the deterministic verifier and the human gate are mandatory, not optional.
-- **The sim and the core loop competing for attention.** Mitigation: a dedicated owner for the sim in parallel, the core loop hits demo-ready first, and the two are tracked separately so neither starves the other.
-- **SpacetimeDB setup time.** Mitigation: start it first; keep the Convex fallback ready.
+- **The sim and the core loop competing for attention.** Mitigation: the core loop reaches a working state first, and the two are tracked separately so neither starves the other.
+- **SpacetimeDB setup time.** Mitigation: start it first; the keyless `mock` backend keeps everything runnable offline meanwhile.
 - **Live hardware failure during judging.** Mitigation: the backup recording and a software-only fallback path.
 - **Overclaiming patient harm.** Mitigation: the honesty requirements in sections 2 and 5.
 

@@ -31,7 +31,9 @@ import requests
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from generate.exploit import PAYLOADS, DeviceCommand, Payload  # noqa: E402
 
-DEVICE_SERVICE_URL = os.environ.get("DEVICE_SERVICE_URL", "http://localhost:5000")
+# Default 8071, NOT 5000: on macOS :5000 is AirPlay, which answers 403 and could
+# masquerade as a patched service (a false VERIFY pass).
+DEVICE_SERVICE_URL = os.environ.get("DEVICE_SERVICE_URL", "http://127.0.0.1:8071")
 COMMAND_PATH = "/device/command"
 
 
@@ -105,8 +107,8 @@ def payload_for_ir_code(code: int) -> Payload:
 
 def on_ir_event(code: int, *, base_url: str = DEVICE_SERVICE_URL) -> DeliverResult:
     """Handler for an `ir_events` row pushed by the serial bridge
-    (judge pressed the remote). TODO(dev): wire this up to the real
-    `ir_events` subscription (SpacetimeDB/Convex, owned by Dev 1/Dev 3) --
+    (someone pressed the remote). TODO: wire this up to the real
+    `ir_events` subscription (the realtime layer's SpacetimeDB) --
     right now it's just the pure code -> payload -> delivery path, called
     directly with a code for dev/testing."""
     payload = payload_for_ir_code(code)

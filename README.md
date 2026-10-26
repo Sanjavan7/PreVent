@@ -81,6 +81,8 @@ VITE_SPACETIMEDB_URI=wss://maincloud.spacetimedb.com
 VITE_SPACETIMEDB_MODULE=prevent
 ```
 
+Prefer not to use the shared instance? Run SpacetimeDB locally (install the CLI, `spacetime start`, then `spacetime publish --module-path realtime/spacetimedb --server local prevent` and point `VITE_SPACETIMEDB_URI` at `ws://localhost:3000`), or set `VITE_REALTIME_BACKEND=mock` for a fully offline, keyless dashboard.
+
 Security loop, headless and offline, no API keys:
 
 ```bash
@@ -91,6 +93,8 @@ uv tool install --python 3.13 bandit==1.9.4
 ./.venv/bin/python security/loop.py
 ./.venv/bin/python -m pytest security/tests
 ```
+
+> **⚠ The `device-service/` target is deliberately vulnerable by design** (CWE-306) so the pipeline has something real to find and fix. It binds to `127.0.0.1` and refuses a non-loopback bind unless you set `PREVENT_INSECURE_BIND=1`. Run it only on localhost; never deploy it or expose it to a network. It listens on **port 8071** — not 5000, where macOS AirPlay answers 403 and would fake a VERIFY pass.
 
 Keys are optional. Set `BITDEER_API_KEY` or `FEATHERLESS_API_KEY` for live exploit generation, `ANTHROPIC_API_KEY` for live Claude triage, `FACTORY_API_KEY` for the live Droid patch stage. Full guides: [`security/README.md`](security/README.md), [`fetch_agent/README.md`](fetch_agent/README.md).
 

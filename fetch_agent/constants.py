@@ -81,12 +81,12 @@ RC_AGENT_NAME = os.environ.get("RC_AGENT_NAME", "Release-Captain")
 RC_AGENT_SEED = os.environ.get("RC_AGENT_SEED", "")
 RC_AGENT_PORT = int(os.environ.get("RC_AGENT_PORT", "8102"))
 # PreVent's agent1q... address, so the Release Captain can message it directly
-# (bypasses the planner — the reliable path for the live two-hop demo).
+# (bypasses the planner for a deterministic peer-to-peer hop).
 PREVENT_PEER_ADDRESS = os.environ.get("PREVENT_PEER_ADDRESS", "")
 
 # ASI:One routes by keyword + semantic match on the README/description. Front-
-# load these verbatim in the Agentverse profile + README so the rehearsed judge
-# phrase reliably reaches this agent.
+# load these verbatim in the Agentverse profile + README so a relevant query
+# reliably reaches this agent.
 ROUTING_KEYWORDS = (
     "medical device security",
     "CVE",

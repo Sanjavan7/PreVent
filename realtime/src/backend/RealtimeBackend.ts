@@ -1,6 +1,7 @@
-// Backend-agnostic realtime interface. The dashboard, 2D sim, serial bridge, and agents code
-// against THIS, never against SpacetimeDB/Convex directly, so the ~H13 gate can swap the
-// adapter (spacetime.ts <-> convex.ts) in one place. Row shapes are the frozen contract types.
+// Backend-agnostic realtime interface. The dashboard, 2D sim, and agents code
+// against THIS, never against SpacetimeDB directly, so the backend adapter
+// (spacetime.ts / mock.ts) can be swapped in one place. Row shapes are the
+// frozen contract types.
 
 import type {
   AgentState,
@@ -14,7 +15,7 @@ import type {
   Stage,
 } from '@prevent/contracts';
 
-export type BackendKind = 'spacetimedb' | 'convex' | 'mock';
+export type BackendKind = 'spacetimedb' | 'mock';
 
 /** Table name -> row type. Names mirror the SpacetimeDB tables (contract 2a). */
 export interface TableMap {

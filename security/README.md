@@ -1,4 +1,4 @@
-# `security/` + `device-service/` — PreVent Security & Verification (Dev 2)
+# `security/` + `device-service/` — PreVent Security & Verification
 
 The autonomous **find → exploit → patch → verify** loop, runnable **headless,
 offline, and with zero API keys** against the team's own localhost toy service.
@@ -11,7 +11,7 @@ GENERATE draft the PoC (Bitdeer if keyed, else cached)           generate/exploi
 DELIVER  fire the UNAUTHENTICATED payload: fan stops, patient    deliver.py
          crashes, device keeps reporting normal + never alarms
 PATCH    deploy the patched service (token required, overrides   device-service/app.py
-         ignored) — stands in for Factory Droid's diff (Dev 1)
+         ignored) — stands in for Factory Droid's diff
 VERIFY   re-send the BYTE-IDENTICAL exploit; assert 401/403 +    verify.py
          true_state unchanged + no lie (deterministic, non-AI)
 RESTORE  flip back to the clean pre-patch state for the next run restore.py
@@ -80,14 +80,14 @@ DEVICE_SERVICE_PATCHED=1 DEVICE_SERVICE_TOKEN=prevent-demo-token DEVICE_SERVICE_
   ./.venv/bin/python device-service/app.py
 ```
 
-## Two integration bridges (Dev 1 and Dev 3)
+## Two integration bridges
 
-Two thin wrappers expose the loop to the other roles without changing any stage
-logic — they only reuse the existing stage functions.
+Two thin wrappers expose the loop to the rest of the system without changing any
+stage logic — they only reuse the existing stage functions.
 
-### `stage_api.py` — JSON-in / JSON-out stage CLI (the subprocess bridge for Dev 1)
+### `stage_api.py` — JSON-in / JSON-out stage CLI (the subprocess bridge)
 
-Dev 1's TypeScript orchestrator can invoke any security stage as a subprocess and
+The TypeScript orchestrator can invoke any security stage as a subprocess and
 parse **one JSON object** off stdout:
 `{"stage", "ok", "data": {...}, "events": [{"actor","text"}...]}`. `data` is a
 superset of the matching orchestrator stub's return shape. Exit code is non-zero
@@ -107,28 +107,28 @@ when `ok` is false.
 ./.venv/bin/python -m security.stage_api --help
 ```
 
-### `emulate_stream.py` — device_status row → serial STATE frames (the bridge for Dev 3)
+### `emulate_stream.py` — device_status row → serial STATE frames
 
 A faithful Python port of `contracts/src/serial.ts` (`deviceStatusToState` +
 `encodeState`). It turns the shared `device_status` row into the
-`STATE,fan=…,rate=…,hr=…,spo2=…,alarm=…,rgb=…\n` frames the emulator / serial-bridge
-consume, so the loop can drive the emulator with **no board and no realtime
-backend**. STATE frames go to stdout (pipe into the emulator); a human-readable
+`STATE,fan=…,rate=…,hr=…,spo2=…,alarm=…,rgb=…\n` frames a board/visualizer
+consumes, so the loop can drive a serial consumer with **no board and no realtime
+backend**. STATE frames go to stdout (pipe into the consumer); a human-readable
 board render goes to stderr.
 
 ```bash
 # one frame from the row file device-service writes, then exit
 ./.venv/bin/python -m security.emulate_stream --row-file /tmp/row.json --once
 
-# follow the row ~4x/sec, emitting a frame on every change — pipe into the emulator
-./.venv/bin/python -m security.emulate_stream --base-url http://127.0.0.1:8071 | <emulator>
+# follow the row ~4x/sec, emitting a frame on every change — pipe into a consumer
+./.venv/bin/python -m security.emulate_stream --base-url http://127.0.0.1:8071 | <consumer>
 PREVENT_DEVICE_ROW_FILE=/tmp/row.json ./.venv/bin/python -m security.emulate_stream   # --watch is the default
 ```
 
 ## Tests
 
 ```bash
-./.venv/bin/python -m pytest security/tests        # 49 tests, ~18s
+./.venv/bin/python -m pytest security/tests        # 67 tests
 ```
 
 Covers: the vulnerable crash+lie and the patched 401/ignored-overrides; the
@@ -147,13 +147,14 @@ SemGrep tests auto-skip if semgrep isn't installed.
 | `DEVICE_SERVICE_PATCHED` | `0` | `1` = patched reference handler |
 | `DEVICE_SERVICE_TOKEN` | *(empty)* | bearer token the patched handler requires |
 | `PREVENT_DEVICE_ROW_FILE` | *(unset)* | JSON sink for the source-of-truth row |
-| `FEATHERLESS_API_KEY` | *(unset)* | **primary** live PoC provider (verified HTTP 200) |
+| `BITDEER_API_KEY` | *(unset)* | **primary** live PoC provider |
+| `BITDEER_BASE_URL` | `https://api-inference.bitdeer.ai/v1` | Bitdeer endpoint |
+| `FEATHERLESS_API_KEY` | *(unset)* | secondary PoC provider; else cached PoC |
 | `FEATHERLESS_BASE_URL` | `https://api.featherless.ai/v1` | Featherless endpoint |
-| `BITDEER_API_KEY` | *(unset)* | secondary PoC provider; else cached PoC |
 | `NVD_API_KEY` | *(unset)* | higher NVD rate limit; cache already committed |
 
-GENERATE is provider-agnostic: it tries Featherless, then Bitdeer, then a
+GENERATE is provider-agnostic: it tries Bitdeer, then Featherless, then a
 pre-cached PoC. Both providers host `deepseek-ai/DeepSeek-V4.1-Flash-1017`.
 
-See [`docs/DEV2-SECURITY-DECISIONS.md`](../docs/DEV2-SECURITY-DECISIONS.md) for
-the design decisions and the Dev 1 / Dev 3 integration seams.
+See [`../docs/ARCHITECTURE.md`](../docs/ARCHITECTURE.md) for the design decisions
+and the integration seams.

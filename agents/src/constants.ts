@@ -32,7 +32,7 @@ export const CONTROL_PORT = Number(process.env.PREVENT_CONTROL_PORT ?? 7331);
  * launched on and the `--base-url` Dev 2's `stage_api` defaults to (8071 — the
  * demo port; macOS reserves 5000 for AirPlay). The Python security bridge
  * (security/stages.ts) passes this to every live stage. Override with
- * PREVENT_DEVICE_URL. See docs/DEV2-SECURITY-DECISIONS.md §4 + §6.
+ * PREVENT_DEVICE_URL. See docs/ARCHITECTURE.md.
  */
 export const DEVICE_BASE_URL = process.env.PREVENT_DEVICE_URL ?? 'http://127.0.0.1:8071';
 

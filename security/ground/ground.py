@@ -34,9 +34,8 @@ CACHE_DIR = Path(__file__).resolve().parent
 CACHE_PATH = CACHE_DIR / "cve-2019-6538.cache.json"
 
 # Known-good reference values for the CISA ICS medical-device advisory on this
-# CVE. NVD's own CVSS score differs from CISA's — the acceptance criteria for
-# this stage ("Verified pins / APIs" in plans/PLAN-DEV2-security-verification.md)
-# requires naming the SOURCE for each score rather than picking one silently.
+# CVE. NVD's own CVSS score differs from CISA's — this stage names the SOURCE for
+# each score rather than picking one silently.
 # This is a hardcoded reference (not re-fetched live) because CISA's advisory
 # isn't exposed by the NVD CVE API itself.
 CISA_CVSS_SCORE = 9.3

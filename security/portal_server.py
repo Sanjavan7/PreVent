@@ -87,9 +87,19 @@ app = Flask(__name__)
 # to a static surface if the device-service isn't up, so this works either way).
 DEVICE_SERVICE_URL = os.environ.get("DEVICE_SERVICE_URL", "http://127.0.0.1:8071")
 
-# The Vite dev server lives on a different origin, so every response needs
-# permissive CORS. Done by hand (no flask-cors dependency).
-_ALLOWED_PORTAL_ORIGINS = ("http://127.0.0.1:5174", "http://localhost:5174")
+# The Vite dev server lives on a different origin, so responses need CORS. We
+# reflect ONLY an allow-listed local origin (never a bare "*"), so a remote web
+# page a user happens to visit can't drive this local control plane. Override the
+# list with PORTAL_ALLOWED_ORIGINS (comma-separated) if the dev server moves.
+_DEFAULT_PORTAL_ORIGINS = (
+    "http://127.0.0.1:5173", "http://localhost:5173",
+    "http://127.0.0.1:5174", "http://localhost:5174",
+)
+_ALLOWED_PORTAL_ORIGINS = tuple(
+    o.strip()
+    for o in os.environ.get("PORTAL_ALLOWED_ORIGINS", ",".join(_DEFAULT_PORTAL_ORIGINS)).split(",")
+    if o.strip()
+)
 
 # Source files that make up the device under scan (what the fleet reads).
 _SCANNED_FILES: list[tuple[str, str]] = [
@@ -154,10 +164,15 @@ def _handle_preflight():
 
 @app.after_request
 def _cors(resp: Response) -> Response:
-    """Permissive CORS on every response so the Vite app (:5174) can call us."""
-    resp.headers["Access-Control-Allow-Origin"] = "*"
-    resp.headers["Access-Control-Allow-Headers"] = "*"
-    resp.headers["Access-Control-Allow-Methods"] = "*"
+    """Reflect the request Origin only when it is allow-listed, so the local Vite
+    app can call us but a remote origin cannot. No Origin (same-origin / curl)
+    passes through untouched."""
+    origin = request.headers.get("Origin", "")
+    if origin and origin in _ALLOWED_PORTAL_ORIGINS:
+        resp.headers["Access-Control-Allow-Origin"] = origin
+        resp.headers["Vary"] = "Origin"
+        resp.headers["Access-Control-Allow-Headers"] = "*"
+        resp.headers["Access-Control-Allow-Methods"] = "*"
     return resp
 
 
@@ -870,13 +885,14 @@ def _free_device_port() -> int:
         return s.getsockname()[1]
 
 
-def _device() -> DeviceService:
+def _device(patched: bool = False) -> DeviceService:
     """Lazily create the device-service singleton (temp row file + log dir) and
-    (re)start it, returning the running service. DeviceService.start() stops any
-    prior process first, so this both launches the service cold and relaunches
-    it from the CURRENT app.py bytes on disk — the committed vulnerable handler
-    on a clean checkout, or Droid's edited bytes after an approved patch.
-    Patched-ness is a property of the file bytes, not a launch flag."""
+    (re)start it in the requested build, returning the running service.
+    DeviceService.start() stops any prior process first, so this launches the
+    service cold and relaunches it between stages: vulnerable for DELIVER, patched
+    for the post-approval VERIFY. The patch stage also edits app.py for real (the
+    Droid diff shown in the UI); the build flag makes VERIFY deterministic whether
+    or not that on-disk edit applied."""
     global _SVC, _SVC_TMPDIR
     with _SVC_LOCK:
         if _SVC is None:
@@ -886,7 +902,7 @@ def _device() -> DeviceService:
                 row_file=_SVC_TMPDIR / "device_row.json",
                 log_dir=_SVC_TMPDIR,
             )
-        _SVC.start()
+        _SVC.start(patched=patched)
         return _SVC
 
 
@@ -1211,7 +1227,7 @@ def _patch_stream():
         # Patch deployed -> reset BOTH the sim and the physical board to healthy,
         # regardless of the verify outcome (fan back on, buzzer off, green LED).
         _apply_state("healthy")
-        svc = _device()
+        svc = _device(patched=True)
         yield _sse(
             {
                 "type": "patch_applied",
@@ -1347,8 +1363,6 @@ def api_restore():
 
 # One board, one core: the UNO R4 WiFi the demo runs on.
 FLASH_FQBN = "arduino:renesas_uno:unor4wifi"
-# The teammate's good firmware we re-flash on restore (its sketch dir).
-BEDSIDE_SKETCH_DIR = REPO_ROOT / "calhacks2026" / "arduino" / "bedside"
 # Per-step ceiling (compile and upload each get their own ~120s budget).
 _FLASH_TIMEOUT_S = 120.0
 
@@ -1501,19 +1515,6 @@ def _flash_sketch(sketch_dir: Path) -> dict[str, Any]:
     )
     combined = compile_out + "\n" + upload_out
     return done(ok, combined, None if ok else "upload failed")
-
-
-def _ensure_libraries(names: list[str]) -> list[str]:
-    """Best-effort `arduino-cli lib install` for each named library (skipped in
-    dry-run). Returns the names that could not be installed (empty if all OK)."""
-    if _dry_run():
-        return []
-    failed: list[str] = []
-    for name in names:
-        ok, _out = _run_cli(["lib", "install", name], timeout=_FLASH_TIMEOUT_S)
-        if not ok:
-            failed.append(name)
-    return failed
 
 
 @app.post("/api/flash")

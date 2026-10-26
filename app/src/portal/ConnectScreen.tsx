@@ -1,20 +1,19 @@
 // The entry point: the portal waits for real hardware, then takes the code to
-// scan — a public GitHub repo (cloned and scanned for real by the control
-// plane) or a locally uploaded folder. Nothing scans until a device is detected.
+// scan — a public GitHub repo, cloned and scanned for real by the control plane.
+// Nothing scans until a device is detected.
 //
 // Visually this is the one signature "teal hero" surface (Vanta-style): a
 // full-bleed teal field with a 1px crystal frame, a dot texture, floating
 // frosted chips, and an editorial serif headline. The working console past
 // here stays white-dominant and calm.
 
-import { useMemo, useRef, useState, type ChangeEvent } from 'react';
+import { useMemo, useState } from 'react';
 import { motion, useReducedMotion } from 'motion/react';
 import type { Pipeline } from './usePipeline';
 import { GitHubMark } from './icons/GitHubMark';
 import { ArrowCircle } from './icons/ArrowCircle';
 import { staggerParent, revealChild, revealReduced } from '../lib/motion';
 
-const CODE_EXT = /\.(py|ino|c|cpp|h|hpp|ts|tsx|js|jsx|go|rs|java|rb|yaml|yml)$/i;
 const SAFE_SEG = /^[A-Za-z0-9._-]+$/;
 
 /** Accept a full URL (https or git@), or bare owner/repo, and return the
@@ -76,8 +75,6 @@ export function ConnectScreen({
   const reduce = !!useReducedMotion();
   const child = reduce ? revealReduced : revealChild;
   const [repoUrl, setRepoUrl] = useState('');
-  const [folder, setFolder] = useState<{ label: string; files: string[] } | null>(null);
-  const folderRef = useRef<HTMLInputElement>(null);
 
   const trimmed = repoUrl.trim();
   const repo = useMemo(() => parseRepo(repoUrl), [repoUrl]);
@@ -87,20 +84,6 @@ export function ConnectScreen({
     if (repoInvalid) return;
     onStart(repo ?? undefined);
   };
-
-  const onFolder = (e: ChangeEvent<HTMLInputElement>) => {
-    const all = Array.from(e.target.files ?? []);
-    const code = all.filter((f) => CODE_EXT.test(f.name));
-    const root = (all[0] as { webkitRelativePath?: string })?.webkitRelativePath?.split('/')[0] ?? 'folder';
-    setFolder({
-      label: root,
-      files: code.map((f) => (f as { webkitRelativePath?: string }).webkitRelativePath || f.name),
-    });
-  };
-
-  // Only preview files the user explicitly uploaded. On connect we just say
-  // "ready" — we don't list the device's own source.
-  const files = folder?.files ?? [];
 
   const scanLabel = !connected ? 'Waiting for device…' : repo ? `Scan ${repo.owner}/${repo.name}` : 'Scan device code';
 
@@ -203,26 +186,10 @@ export function ConnectScreen({
                   </button>
                 )}
               </div>
-              <button
-                type="button"
-                onClick={() => folderRef.current?.click()}
-                className="press state-transition shrink-0 rounded-[var(--radius-md)] border border-border bg-white/70 px-3 py-2 text-sm text-text-secondary hover:bg-white"
-              >
-                Upload folder
-              </button>
-              <input
-                ref={(el) => {
-                  if (el) {
-                    el.setAttribute('webkitdirectory', '');
-                    el.setAttribute('directory', '');
-                  }
-                }}
-                type="file"
-                multiple
-                onChange={onFolder}
-                className="hidden"
-              />
             </div>
+            <p className="mt-2 text-meta text-text-muted">
+              Leave blank to scan the connected device's own firmware &amp; service code.
+            </p>
 
             {/* parsed repo chip / validation hint / prior error */}
             {repo ? (
@@ -235,24 +202,9 @@ export function ConnectScreen({
               <div className="mt-2 font-mono text-meta text-danger-fg">
                 enter a repo as <span className="text-text-secondary">owner/repo</span> or a full github.com URL
               </div>
-            ) : folder ? (
-              <div className="mt-2 font-mono text-meta text-text-secondary">
-                folder: <span className="text-accent-fg">{folder.label}</span>
-                {folder.files.length ? <span className="text-text-muted"> · {folder.files.length} source files</span> : null}
-              </div>
             ) : scanError ? (
               <div className="mt-2 font-mono text-meta text-danger-fg">{scanError}</div>
             ) : null}
-
-            {files.length > 0 && (
-              <ul className="mt-3 max-h-40 overflow-y-auto border-t border-border [overscroll-behavior:contain]">
-                {files.slice(0, 40).map((p) => (
-                  <li key={p} className="flex items-center justify-between border-b border-border py-1.5 last:border-b-0">
-                    <span className="truncate font-mono text-meta text-text">{p}</span>
-                  </li>
-                ))}
-              </ul>
-            )}
           </motion.div>
 
           <motion.button
