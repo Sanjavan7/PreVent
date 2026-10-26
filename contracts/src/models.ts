@@ -12,11 +12,9 @@ export const CLAUDE_AGENT_SDK = '@anthropic-ai/claude-agent-sdk@0.3.310';
 
 // Exploit-PoC generation is provider-agnostic (any OpenAI-compatible
 // /v1/chat/completions endpoint with Authorization: Bearer). Both providers host
-// the SAME deepseek-ai/DeepSeek-V4.1-Flash-1017 model.
-//
-// FEATHERLESS is primary (Bitdeer had not funded hackathon credits — its key
-// authenticates but returns HTTP 402 insufficient_balance). The model id carries
-// a date suffix (`-1017`); the suffix-less id is a fallback.
+// the SAME deepseek-ai/DeepSeek-V4.1-Flash-1017 model; set a key for whichever
+// you have access to. The model id carries a date suffix (`-1017`); the
+// suffix-less id is a fallback.
 export const EXPLOIT_MODEL = 'deepseek-ai/DeepSeek-V4.1-Flash-1017';
 export const EXPLOIT_MODEL_FALLBACK = 'deepseek-ai/DeepSeek-V4.1-Flash';
 

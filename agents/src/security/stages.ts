@@ -1,7 +1,7 @@
 // Frozen DEV1 <-> DEV2/DEV3 security SEAM (PLAN-DEV1 foundation).
 //
 // DEV2 owns the REAL security logic — the Python scanners, exploit generation,
-// delivery and verification living in C:/Users/chris/orca/calhacks/security/.
+// delivery and verification living in the repo's security/ directory.
 // DEV1 owns HOW those stages run inside the Agent SDK pipeline. This module is
 // the typed contract between them so the two sides can be built in parallel:
 //
@@ -23,6 +23,8 @@
 // `import type` per verbatimModuleSyntax.
 
 import { execFile } from 'node:child_process';
+import { dirname, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 
 import type { Finding, Stage } from '@prevent/contracts';
@@ -33,8 +35,12 @@ import { DEVICE_BASE_URL } from '../constants';
 
 const execFileAsync = promisify(execFile);
 
-/** Repo root; the Python stages run with this as cwd. */
-const REPO_ROOT = 'C:/Users/chris/orca/calhacks';
+/** Repo root; the Python stages run with this as cwd. Derived from this file's
+ *  location (agents/src/security/) so it is portable across machines, and
+ *  overridable with PREVENT_REPO_ROOT. */
+const REPO_ROOT =
+  process.env.PREVENT_REPO_ROOT ??
+  resolve(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
 
 /** A finding row before the backend assigns id/createdAt. */
 type NewFinding = Omit<Finding, 'id' | 'createdAt'>;

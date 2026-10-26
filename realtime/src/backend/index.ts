@@ -1,17 +1,14 @@
 // Backend factory - the ONE place that decides which realtime backend is live.
-// Selection: VITE_REALTIME_BACKEND = spacetimedb | convex | mock (see .env.example).
+// Selection: VITE_REALTIME_BACKEND = spacetimedb | mock (see .env.example).
 //
-// spacetime.ts imports the GENERATED ../module_bindings, so it is loaded lazily: `mock` and
-// `convex` work (and typecheck-in-isolation consumers can run) before bindings exist.
+// spacetime.ts imports the GENERATED ../module_bindings, so it is loaded lazily:
+// `mock` works (and typecheck-in-isolation consumers can run) before bindings exist.
 
-import { ConvexBackend } from './convex';
 import { MockBackend } from './mock';
 import type { BackendKind, RealtimeBackend } from './RealtimeBackend';
 
 export * from './RealtimeBackend';
 export { MockBackend } from './mock';
-export { ConvexBackend } from './convex';
-export type { ConvexConfig } from './convex';
 export type { SpacetimeConfig } from './spacetime';
 
 type Env = Record<string, string | undefined>;
@@ -37,10 +34,11 @@ export async function createBackend(
         token: env.SPACETIMEDB_TOKEN, // TODO(dev): per-service token (bridge/agents), unset in browser
       });
     }
-    case 'convex':
-      if (!env.VITE_CONVEX_URL) throw new Error('VITE_CONVEX_URL is not set');
-      return new ConvexBackend({ url: env.VITE_CONVEX_URL });
     case 'mock':
       return new MockBackend();
+    default:
+      throw new Error(
+        `VITE_REALTIME_BACKEND="${k}" is not a known backend. Use "spacetimedb" or "mock".`
+      );
   }
 }

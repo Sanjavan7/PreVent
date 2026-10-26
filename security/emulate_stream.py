@@ -1,10 +1,10 @@
-"""emulate_stream — drive Dev 3's emulator from the device_status row (Dev 2).
+"""emulate_stream — turn the device_status row into serial STATE frames.
 
 Converts the shared `device_status` row (the one device-service writes to
 PREVENT_DEVICE_ROW_FILE / exposes at GET /device/_truth) into the serial
-`STATE,...` frames the emulator + serial-bridge consume, so the security loop can
-drive the emulator with NO board and NO realtime backend. Pipe this script's
-stdout into the emulator; the human-readable board render goes to stderr.
+`STATE,...` frames a board/visualizer consumes, so the security loop can drive a
+downstream consumer with NO board and NO realtime backend. Pipe this script's
+stdout into the consumer; the human-readable board render goes to stderr.
 
 This is a faithful Python port of `contracts/src/serial.ts`
 (`deviceStatusToState` + `encodeState`) — the ONE mapping from the source-of-truth
@@ -36,7 +36,7 @@ frame (and, in --once, exits non-zero).
 
 Usage:
   python -m security.emulate_stream --row-file /tmp/row.json --once
-  python -m security.emulate_stream --base-url http://127.0.0.1:8071 | <emulator>
+  python -m security.emulate_stream --base-url http://127.0.0.1:8071 | <consumer>
 """
 
 from __future__ import annotations

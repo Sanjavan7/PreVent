@@ -16,13 +16,29 @@ import type { HumanGate } from './humanGate';
 import type { RealtimeBackend } from './realtime/backend';
 import { CONTROL_PORT } from './constants';
 
+// The control plane binds to loopback only (see start()), so it is never
+// network-reachable; this CORS allows the local dashboard (a separate port) to
+// call it. State-changing routes are additionally guarded by `authorized()`.
 const JSON_HEADERS: Record<string, string> = {
   'Content-Type': 'application/json',
-  // Permissive CORS so the Dev 3 dashboard (a separate origin/port) can POST.
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-  'Access-Control-Allow-Headers': 'Content-Type',
+  'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-Control-Token',
 };
+
+// Loopback is the primary protection; set CONTROL_TOKEN to additionally require
+// `Authorization: Bearer <token>` (or an `X-Control-Token` header) on the
+// state-changing routes, as defense-in-depth against a local cross-origin caller.
+const CONTROL_TOKEN = process.env.CONTROL_TOKEN ?? '';
+
+function authorized(req: IncomingMessage): boolean {
+  if (!CONTROL_TOKEN) return true; // loopback-only; token enforcement is opt-in
+  const header = req.headers['authorization'];
+  const bearer = typeof header === 'string' ? header.replace(/^Bearer\s+/i, '').trim() : '';
+  const alt = req.headers['x-control-token'];
+  const token = bearer || (typeof alt === 'string' ? alt.trim() : '');
+  return token.length > 0 && token === CONTROL_TOKEN;
+}
 
 /**
  * Local HTTP control plane for the human-approval gate. Construct with the
@@ -61,7 +77,7 @@ export class ControlServer {
         if (err.code === 'EADDRINUSE' && !triedEphemeral) {
           triedEphemeral = true;
           void this.backend.logEvent('control', `Port ${port} in use; retrying on an ephemeral port.`);
-          server.listen(0);
+          server.listen(0, '127.0.0.1');
           return;
         }
         reject(err);
@@ -73,7 +89,9 @@ export class ControlServer {
         void this.backend.logEvent('control', `Control server listening at http://127.0.0.1:${this.boundPort}`);
         resolve();
       });
-      server.listen(port);
+      // Bind to loopback only: this is a local control plane, never exposed to
+      // the network (it settles the human-approval gate and injects IR events).
+      server.listen(port, '127.0.0.1');
     });
   }
 
@@ -115,6 +133,12 @@ export class ControlServer {
           this.backend.getAgentStatuses(),
         ]);
         this.send(res, 200, { device, agents });
+        return;
+      }
+
+      // State-changing routes require auth when CONTROL_TOKEN is set.
+      if (method === 'POST' && !authorized(req)) {
+        this.send(res, 401, { ok: false, error: 'unauthorized' });
         return;
       }
 

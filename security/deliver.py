@@ -31,7 +31,9 @@ import requests
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from generate.exploit import PAYLOADS, DeviceCommand, Payload  # noqa: E402
 
-DEVICE_SERVICE_URL = os.environ.get("DEVICE_SERVICE_URL", "http://localhost:5000")
+# Default 8071, NOT 5000: on macOS :5000 is AirPlay, which answers 403 and could
+# masquerade as a patched service (a false VERIFY pass).
+DEVICE_SERVICE_URL = os.environ.get("DEVICE_SERVICE_URL", "http://127.0.0.1:8071")
 COMMAND_PATH = "/device/command"
 
 

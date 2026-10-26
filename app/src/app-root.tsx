@@ -1,6 +1,6 @@
 // Shared provider shell for both standalone pages (Command Center + Patient
 // Ward). Extracted verbatim from the old single-page main.tsx so each entry
-// wraps its page in exactly the same house motion defaults, the convex
+// wraps its page in exactly the same house motion defaults, the backend
 // fail-loud guard, and (only in live mode) the SpacetimeDB connection — one
 // subscription source, two pages, no desync.
 
@@ -15,14 +15,13 @@ const BACKEND = import.meta.env.VITE_REALTIME_BACKEND ?? 'mock';
 const STDB_URI = import.meta.env.VITE_SPACETIMEDB_URI ?? 'ws://localhost:3000';
 const STDB_MODULE = import.meta.env.VITE_SPACETIMEDB_MODULE ?? 'prevent';
 
-// Fail LOUD on an unimplemented backend. The Convex adapter is a dormant stub
-// (no server functions), and `useRealtime` silently falls back to mock for any
-// non-`spacetimedb` value -- which would render a *fake-live* dashboard. Rather
-// than mislead a judge, refuse to boot with a clear message.
+// Fail LOUD on an unknown backend: `useRealtime` silently falls back to mock for
+// any non-`spacetimedb` value -- which would render a *fake-live* dashboard.
+// Rather than mislead, refuse to boot with a clear message.
 if (BACKEND !== 'mock' && BACKEND !== 'spacetimedb') {
   throw new Error(
-    `VITE_REALTIME_BACKEND="${BACKEND}" is not implemented. Convex is dormant ` +
-      `(no server functions). Use "spacetimedb" (live) or "mock" (fallback).`,
+    `VITE_REALTIME_BACKEND="${BACKEND}" is not a known backend. ` +
+      `Use "spacetimedb" (live) or "mock" (fallback).`,
   );
 }
 

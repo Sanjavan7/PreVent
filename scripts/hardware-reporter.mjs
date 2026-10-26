@@ -17,11 +17,18 @@
 // Usage:
 //   ARDUINO_SERIAL_PORT=/dev/cu.usbmodem... node scripts/hardware-reporter.mjs
 //
-// IMPORTANT: cannot run concurrently with the serial-bridge on the same laptop — both
-// want exclusive access to the serial port. Pick one direction per machine.
+// IMPORTANT: only one process may hold the serial port at a time — don't run this
+// concurrently with another serial consumer (or the portal's flash) on the same
+// laptop. Pick one direction per machine.
 
 import { SerialPort, ReadlineParser } from 'serialport';
 import { spawn } from 'node:child_process';
+import { dirname, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+// Resolve seed-demo.sh against this script's own dir so the reporter works from
+// any cwd, not only the repo root.
+const SEED_DEMO = resolve(dirname(fileURLToPath(import.meta.url)), 'seed-demo.sh');
 
 const port = process.env.ARDUINO_SERIAL_PORT;
 if (!port) {
@@ -45,7 +52,7 @@ function flipState(target) {
   if (target === lastState) return;
   callInFlight = true;
   console.log(`[reporter] fan state ${lastState ?? '(unknown)'} -> ${target}`);
-  const p = spawn('./scripts/seed-demo.sh', [target === 'healthy' ? 'healthy' : 'attack', 'maincloud'], {
+  const p = spawn(SEED_DEMO, [target === 'healthy' ? 'healthy' : 'attack', 'maincloud'], {
     stdio: 'inherit',
   });
   p.on('exit', (code) => {

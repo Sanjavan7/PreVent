@@ -18,8 +18,7 @@
   },
   "dependencies": {
     "@prevent/contracts": "workspace:*",
-    "spacetimedb": "2.13.0",
-    "convex": "1.48.0"
+    "spacetimedb": "2.13.0"
   },
   "devDependencies": {
     "typescript": "7.0.2",
