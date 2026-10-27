@@ -10,7 +10,7 @@ The vulnerability is usually known and the fix usually exists, but nobody ships 
 
 `Claude` · `Factory Droid` · `SpacetimeDB` · `Fetch.ai ASI:One` · `Bitdeer / DeepSeek` · `Arduino` · `three.js` · `React`
 
-[Demo video](https://youtu.be/Aq5WXmQQooo) · Live ASI:One agent `PreVent-Security` · Built in 36 hours at Cal Hacks 13.0
+[Demo video](https://youtu.be/5u1bG7nEzvI) · Live ASI:One agent `PreVent-Security` · Built in 36 hours at Cal Hacks 13.0
 
 </div>
 
